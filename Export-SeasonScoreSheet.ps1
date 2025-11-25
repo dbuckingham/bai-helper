@@ -130,13 +130,13 @@ try {
     Write-Host "Navigating to Season Score Sheet page..." -ForegroundColor Yellow
     $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -WebSession $WebSession -UseBasicParsing
     
-    # Extract school name from the page
+    # Extract school name from the page by searching for the Label_school_name element
     $SchoolName = "Unknown School"
-    if ($ScoreSheetResponse.Content -match '<span[^>]*id="[^"]*lblSchoolName[^"]*"[^>]*>([^<]+)</span>') {
+    if ($ScoreSheetResponse.Content -match '<span[^>]*id="ctl00_ContentPlaceHolder1_Label_school_name"[^>]*>([^<]+)</span>') {
         $SchoolName = $Matches[1].Trim()
-    } elseif ($ScoreSheetResponse.Content -match '<h\d[^>]*>([^<]*School[^<]*)</h\d>') {
+    } elseif ($ScoreSheetResponse.Content -match 'id="[^"]*Label_school_name[^"]*"[^>]*>([^<]+)<') {
         $SchoolName = $Matches[1].Trim()
-    } elseif ($ScoreSheetResponse.Content -match 'class="school[^"]*"[^>]*>([^<]+)<') {
+    } elseif ($ScoreSheetResponse.Content -match '<span[^>]*id="[^"]*lblSchoolName[^"]*"[^>]*>([^<]+)</span>') {
         $SchoolName = $Matches[1].Trim()
     }
     
