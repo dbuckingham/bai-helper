@@ -141,7 +141,7 @@ try {
     }
     
     # Clean the school name for use in file paths
-    $SchoolNameClean = $SchoolName -replace '[<>:"/\\|?*]', '_'
+    $SchoolNameClean = $SchoolName -replace '[<>:"/\\|?*\[\]]', '_'
     $SchoolNameClean = $SchoolNameClean.Trim()
     if ([string]::IsNullOrWhiteSpace($SchoolNameClean)) {
         $SchoolNameClean = "Organization_$OrganizationId"
@@ -179,9 +179,11 @@ try {
         
         # Find the season value
         $SeasonValue = ""
-        if ($ScoreSheetResponse.Content -match "<option[^>]*value=`"([^`"]*)`"[^>]*>$Season</option>") {
+        $SeasonPattern1 = '<option[^>]*value="([^"]*)"[^>]*>' + [regex]::Escape($Season) + '</option>'
+        $SeasonPattern2 = '<option[^>]*value="([^"]*)"[^>]*>[^<]*' + [regex]::Escape($Season) + '[^<]*</option>'
+        if ($ScoreSheetResponse.Content -match $SeasonPattern1) {
             $SeasonValue = $Matches[1]
-        } elseif ($ScoreSheetResponse.Content -match "<option[^>]*value=`"([^`"]*)`"[^>]*>[^<]*$Season[^<]*</option>") {
+        } elseif ($ScoreSheetResponse.Content -match $SeasonPattern2) {
             $SeasonValue = $Matches[1]
         }
         
@@ -271,7 +273,7 @@ try {
     # Check if the response is CSV data
     if ($ContentType -match "text/csv|application/csv|application/octet-stream" -or $ContentDisposition) {
         $CsvContent = $ExportResponse.Content
-    } elseif ($ExportResponse.Content -match "^[\w\s,`"]+\r?\n") {
+    } elseif ($ExportResponse.Content -match '^[\w\s,"]+\r?\n') {
         # Response might be CSV without proper headers
         $CsvContent = $ExportResponse.Content
     }
@@ -308,31 +310,48 @@ try {
         # Try to parse the HTML table directly
         Write-Host "Direct export not available. Attempting to parse table data..." -ForegroundColor Yellow
         
+        # Helper function to strip HTML tags and decode entities
+        function Get-CleanText {
+            param([string]$HtmlText)
+            # Remove HTML tags
+            $text = $HtmlText -replace '<[^>]+>', ''
+            # Decode common HTML entities
+            $text = $text -replace '&nbsp;', ' '
+            $text = $text -replace '&amp;', '&'
+            $text = $text -replace '&lt;', '<'
+            $text = $text -replace '&gt;', '>'
+            $text = $text -replace '&quot;', '"'
+            $text = $text -replace '&#(\d+);', { [char][int]$_.Groups[1].Value }
+            return $text.Trim()
+        }
+        
         # Extract table data from the page
         $TableData = @()
         
-        # Find the main data table
-        if ($ScoreSheetResponse.Content -match '<table[^>]*class="[^"]*(?:grid|data|score)[^"]*"[^>]*>(.*?)</table>') {
+        # Find the main data table - try multiple patterns
+        $TablePattern = '<table[^>]*(?:class="[^"]*(?:grid|data|score)[^"]*"|id="[^"]*(?:gv|grid|tbl)[^"]*")[^>]*>([\s\S]*?)</table>'
+        if ($ScoreSheetResponse.Content -match $TablePattern) {
             $TableHtml = $Matches[1]
             
-            # Extract headers
+            # Extract headers - handle content that may contain nested tags
             $Headers = @()
-            [regex]::Matches($TableHtml, '<th[^>]*>([^<]*)</th>') | ForEach-Object {
-                $Headers += $_.Groups[1].Value.Trim()
+            [regex]::Matches($TableHtml, '<th[^>]*>([\s\S]*?)</th>') | ForEach-Object {
+                $Headers += Get-CleanText $_.Groups[1].Value
             }
             
-            # Extract rows
-            [regex]::Matches($TableHtml, '<tr[^>]*>(.*?)</tr>') | ForEach-Object {
+            # Extract rows - handle content that may contain nested tags
+            [regex]::Matches($TableHtml, '<tr[^>]*>([\s\S]*?)</tr>') | ForEach-Object {
                 $RowHtml = $_.Groups[1].Value
                 $RowData = @()
-                [regex]::Matches($RowHtml, '<td[^>]*>([^<]*)</td>') | ForEach-Object {
-                    $RowData += $_.Groups[1].Value.Trim()
+                [regex]::Matches($RowHtml, '<td[^>]*>([\s\S]*?)</td>') | ForEach-Object {
+                    $RowData += Get-CleanText $_.Groups[1].Value
                 }
                 
                 if ($RowData.Count -gt 0) {
                     $RowObject = [PSCustomObject]@{}
                     for ($i = 0; $i -lt [Math]::Min($Headers.Count, $RowData.Count); $i++) {
-                        $RowObject | Add-Member -NotePropertyName $Headers[$i] -NotePropertyValue $RowData[$i]
+                        $HeaderName = if ([string]::IsNullOrWhiteSpace($Headers[$i])) { "Column$i" } else { $Headers[$i] }
+                        $RowObject | Add-Member -NotePropertyName $HeaderName -NotePropertyValue $RowData[$i]
                     }
                     $TableData += $RowObject
                 }
