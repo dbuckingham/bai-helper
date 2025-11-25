@@ -78,7 +78,7 @@ $Username = $Credential.UserName
 $Password = $Credential.GetNetworkCredential().Password
 
 # Create a web session to maintain cookies
-$WebSession = $null
+$WebSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 try {
     Write-Host "Connecting to NASP Tournaments..." -ForegroundColor Yellow
@@ -86,12 +86,20 @@ try {
     # First, get the login page to retrieve any necessary tokens (like __VIEWSTATE)
     $LoginPageResponse = Invoke-WebRequest -Uri $LoginUrl -SessionVariable WebSession -UseBasicParsing
     
-    # Parse the form to get __VIEWSTATE, __VIEWSTATEGENERATOR, __EVENTVALIDATION
+    # Parse the form to get __EVENTTARGET, __EVENTARGUMENT, __VIEWSTATE, __VIEWSTATEGENERATOR, __EVENTVALIDATION
+    $EventTarget = ""
+    $EventArgument = ""
     $ViewState = ""
     $ViewStateGenerator = ""
     $EventValidation = ""
     
     # Try to extract hidden fields from the login page
+    if ($LoginPageResponse.Content -match 'id="__EVENTTARGET"\s+value="([^"]*)"') {
+        $EventTarget = $Matches[1]
+    }
+    if ($LoginPageResponse.Content -match 'id="__EVENTARGUMENT"\s+value="([^"]*)"') {
+        $EventArgument = $Matches[1]
+    }
     if ($LoginPageResponse.Content -match 'id="__VIEWSTATE"\s+value="([^"]*)"') {
         $ViewState = $Matches[1]
     }
@@ -101,16 +109,18 @@ try {
     if ($LoginPageResponse.Content -match 'id="__EVENTVALIDATION"\s+value="([^"]*)"') {
         $EventValidation = $Matches[1]
     }
-    
+
     # Prepare login form data
     # Note: The actual field names may vary - these are common ASP.NET patterns
     $LoginBody = @{
+        "__EVENTTARGET" = $EventTarget
+        "__EVENTARGUMENT" = $EventArgument
         "__VIEWSTATE" = $ViewState
         "__VIEWSTATEGENERATOR" = $ViewStateGenerator
         "__EVENTVALIDATION" = $EventValidation
-        "ctl00`$ContentPlaceHolder1`$txtUserName" = $Username
-        "ctl00`$ContentPlaceHolder1`$txtPassword" = $Password
-        "ctl00`$ContentPlaceHolder1`$btnLogin" = "Login"
+        "ctl00`$ContentPlaceHolder1`$TextBox_username" = $Username
+        "ctl00`$ContentPlaceHolder1`$TextBox_password" = $Password
+        "ctl00`$ContentPlaceHolder1`$Button_login" = "Sign In"
     }
     
     Write-Host "Logging in as $Username..." -ForegroundColor Yellow
@@ -125,11 +135,11 @@ try {
     }
     
     Write-Host "Login successful!" -ForegroundColor Green
-    
+
     # Navigate to the Season Score Sheet page
     Write-Host "Navigating to Season Score Sheet page..." -ForegroundColor Yellow
     $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -WebSession $WebSession -UseBasicParsing
-    
+
     # Extract school name from the page by searching for the Label_school_name element
     $SchoolName = "Unknown School"
     if ($ScoreSheetResponse.Content -match '<span[^>]*id="ctl00_ContentPlaceHolder1_Label_school_name"[^>]*>([^<]+)</span>') {
@@ -222,26 +232,8 @@ try {
     # Find and click the export button
     Write-Host "Exporting score sheet to CSV..." -ForegroundColor Yellow
     
-    # Look for export/download button
-    $ExportButtonName = ""
-    if ($ScoreSheetResponse.Content -match '<input[^>]*id="([^"]*(?:btnExport|btnDownload|btnCSV|Export)[^"]*)"[^>]*type="submit"') {
-        $ExportButtonName = $Matches[1] -replace '_', '`$'
-    } elseif ($ScoreSheetResponse.Content -match '<input[^>]*type="submit"[^>]*id="([^"]*(?:btnExport|btnDownload|btnCSV|Export)[^"]*)"') {
-        $ExportButtonName = $Matches[1] -replace '_', '`$'
-    } elseif ($ScoreSheetResponse.Content -match '<a[^>]*id="([^"]*(?:lnkExport|lnkDownload|Export)[^"]*)"') {
-        $ExportButtonName = $Matches[1] -replace '_', '`$'
-    }
-    
-    # If no explicit export button, look for any CSV-related link or button
-    if (-not $ExportButtonName) {
-        # Try alternative patterns
-        if ($ScoreSheetResponse.Content -match 'name="([^"]*Export[^"]*)"') {
-            $ExportButtonName = $Matches[1]
-        } elseif ($ScoreSheetResponse.Content -match 'id="([^"]*csv[^"]*)"') {
-            $ExportButtonName = $Matches[1] -replace '_', '`$'
-        }
-    }
-    
+    $ExportButtonName = "ctl00`$ContentPlaceHolder1`$Button_export"
+
     # Build export request body
     $ExportBody = @{
         "__VIEWSTATE" = $ScoreSheetViewState
@@ -266,7 +258,7 @@ try {
     $CsvContent = $null
     $FileName = "SeasonScoreSheet.csv"
     
-    if ($ContentDisposition -match 'filename="?([^";]+)"?') {
+    if (($ContentDisposition -join " ") -match 'filename="?([^";]+)"?') {
         $FileName = $Matches[1]
     }
     
