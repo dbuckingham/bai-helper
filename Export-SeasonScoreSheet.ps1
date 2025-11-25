@@ -118,9 +118,9 @@ try {
     # Submit the login form
     $LoginResponse = Invoke-WebRequest -Uri $LoginUrl -Method POST -Body $LoginBody -WebSession $WebSession -UseBasicParsing
     
-    # Check if login was successful by looking for common indicators
-    if ($LoginResponse.Content -match "Invalid|incorrect|failed|error" -and $LoginResponse.Content -notmatch "logout|welcome|dashboard") {
-        Write-Error "Login may have failed. Please check your credentials."
+    # Check if login was successful using the HTTP status code
+    if ($LoginResponse.StatusCode -ne 200) {
+        Write-Error "Login failed with status code: $($LoginResponse.StatusCode). Please check your credentials."
         exit 1
     }
     
