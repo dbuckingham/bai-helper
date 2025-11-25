@@ -53,6 +53,10 @@ if (-not $Credential) {
 $username = $Credential.UserName
 $password = $Credential.GetNetworkCredential().Password
 
+# Constants for data parsing
+$HEADER_PATTERNS = @('Name', 'Archer', '#', 'Student')
+$SCORE_DATA_JS_VARIABLE = 'scoreData'  # JavaScript variable name used by the website
+
 Write-Host "Connecting to nasptournaments.org..." -ForegroundColor Green
 
 # Create a web session to maintain cookies
@@ -80,7 +84,13 @@ try {
     }
     
     # Step 2: Post login credentials
-    Write-Host "Logging in as $username..." -ForegroundColor Yellow
+    # Sanitize username for logging (show only first 3 chars)
+    $sanitizedUsername = if ($username.Length -gt 3) { 
+        $username.Substring(0, 3) + "***" 
+    } else { 
+        "***" 
+    }
+    Write-Host "Logging in as $sanitizedUsername..." -ForegroundColor Yellow
     
     # Build the login form data
     $loginBody = @{
@@ -144,7 +154,8 @@ try {
             }
             
             # Skip header rows and empty rows
-            if ($cellValues.Count -ge 3 -and $cellValues[0] -notmatch '^(Name|Archer|#)$' -and $cellValues[0] -ne '') {
+            $headerPattern = '^(' + ($HEADER_PATTERNS -join '|') + ')$'
+            if ($cellValues.Count -ge 3 -and $cellValues[0] -notmatch $headerPattern -and $cellValues[0] -ne '') {
                 # Try to find score and "Use For Team" indicator
                 # Common patterns: Name, Score, UseForTeam or similar
                 
@@ -186,7 +197,10 @@ try {
         Write-Host "Trying alternative data parsing method..." -ForegroundColor Yellow
         
         # Look for JSON data or JavaScript variables that might contain the data
-        if ($content -match 'var\s+scoreData\s*=\s*(\[.*?\]);') {
+        # Note: This assumes the website uses a JavaScript variable named as defined in $SCORE_DATA_JS_VARIABLE
+        # If the website structure changes, this pattern may need adjustment
+        $jsPattern = 'var\s+' + [regex]::Escape($SCORE_DATA_JS_VARIABLE) + '\s*=\s*(\[.*?\]);'
+        if ($content -match $jsPattern) {
             $jsonData = $matches[1]
             $archers = ConvertFrom-Json $jsonData
             
