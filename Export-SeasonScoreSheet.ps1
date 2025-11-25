@@ -183,20 +183,23 @@ try {
     }
     
     # If Season parameter not provided, extract the default selected value from the dropdown
-    if (-not $Season) {
-        # Look for the selected option in the dropdown
-        if ($ScoreSheetResponse.Content -match '<option[^>]*selected[^>]*>([^<]+)</option>') {
-            $Season = $Matches[1].Trim()
-            Write-Host "Using default season: $Season" -ForegroundColor Cyan
-        } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="[^"]*Season[^"]*"[^>]*>[\s\S]*?<option[^>]*value="[^"]*"[^>]*>([^<]+)</option>') {
-            # Fall back to first option if no selected attribute
-            $Season = $Matches[1].Trim()
-            Write-Host "Using first available season: $Season" -ForegroundColor Cyan
-        }
+    $DefaultSeason = ""
+    if ($ScoreSheetResponse.Content -match '<option[^>]*selected[^>]*>([^<]+)</option>') {
+        $DefaultSeason = $Matches[1].Trim()
+    } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="[^"]*Season[^"]*"[^>]*>[\s\S]*?<option[^>]*value="[^"]*"[^>]*>([^<]+)</option>') {
+        # Fall back to first option if no selected attribute
+        $DefaultSeason = $Matches[1].Trim()
     }
     
-    # If a specific season was requested (or we need to select the found default), select it from the dropdown
-    if ($Season) {
+    if (-not $Season) {
+        $Season = $DefaultSeason
+        Write-Host "Using default season: $Season" -ForegroundColor Cyan
+    }
+    
+    # Only perform postback if user specified a different season than the default
+    $NeedsPostback = $Season -and ($Season -ne $DefaultSeason)
+    
+    if ($NeedsPostback) {
         Write-Host "Selecting season: $Season..." -ForegroundColor Yellow
         
         # Find the season value
@@ -210,21 +213,23 @@ try {
         }
         
         if ($SeasonValue -and $SeasonDropdownId) {
-            # Convert ASP.NET client ID to server control ID format for postback
+            # Convert ASP.NET client ID to server control ID format for form field name
             $SeasonDropdownName = $SeasonDropdownId -replace '_', '`$'
             
+            # Perform postback to update the data table with the selected season
             $SeasonSelectBody = @{
                 "__VIEWSTATE" = $ScoreSheetViewState
                 "__VIEWSTATEGENERATOR" = $ScoreSheetViewStateGenerator
                 "__EVENTVALIDATION" = $ScoreSheetEventValidation
-                "__EVENTTARGET" = $SeasonDropdownName
+                "__EVENTTARGET" = $SeasonDropdownId  # Use client ID format for __EVENTTARGET
                 "__EVENTARGUMENT" = ""
                 $SeasonDropdownName = $SeasonValue
             }
             
+            Write-Host "Performing postback to update data table..." -ForegroundColor Yellow
             $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $SeasonSelectBody -WebSession $WebSession -UseBasicParsing
             
-            # Re-extract form fields after season selection
+            # Re-extract form fields after season selection postback
             if ($ScoreSheetResponse.Content -match 'id="__VIEWSTATE"\s+value="([^"]*)"') {
                 $ScoreSheetViewState = $Matches[1]
             }
@@ -238,7 +243,10 @@ try {
             Write-Host "Season selected: $Season" -ForegroundColor Green
         } else {
             Write-Warning "Could not find season '$Season' in dropdown. Using default season."
+            $Season = $DefaultSeason
         }
+    } else {
+        Write-Host "Using season: $Season" -ForegroundColor Cyan
     }
     
     # Find and click the export button
