@@ -174,18 +174,30 @@ try {
         $ScoreSheetEventValidation = $Matches[1]
     }
     
-    # If a specific season was requested, select it from the dropdown
+    # Find the season dropdown and extract default value if not provided
+    $SeasonDropdownId = ""
+    if ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*Season[^"]*)"') {
+        $SeasonDropdownId = $Matches[1]
+    } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*ddl[^"]*)"') {
+        $SeasonDropdownId = $Matches[1]
+    }
+    
+    # If Season parameter not provided, extract the default selected value from the dropdown
+    if (-not $Season) {
+        # Look for the selected option in the dropdown
+        if ($ScoreSheetResponse.Content -match '<option[^>]*selected[^>]*>([^<]+)</option>') {
+            $Season = $Matches[1].Trim()
+            Write-Host "Using default season: $Season" -ForegroundColor Cyan
+        } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="[^"]*Season[^"]*"[^>]*>[\s\S]*?<option[^>]*value="[^"]*"[^>]*>([^<]+)</option>') {
+            # Fall back to first option if no selected attribute
+            $Season = $Matches[1].Trim()
+            Write-Host "Using first available season: $Season" -ForegroundColor Cyan
+        }
+    }
+    
+    # If a specific season was requested (or we need to select the found default), select it from the dropdown
     if ($Season) {
         Write-Host "Selecting season: $Season..." -ForegroundColor Yellow
-        
-        # Find the dropdown and its options
-        # Look for select element with season options
-        $SeasonDropdownId = ""
-        if ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*Season[^"]*)"') {
-            $SeasonDropdownId = $Matches[1]
-        } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*ddl[^"]*)"') {
-            $SeasonDropdownId = $Matches[1]
-        }
         
         # Find the season value
         $SeasonValue = ""
