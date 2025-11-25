@@ -1,0 +1,17 @@
+# Output files
+*.csv
+scoresheet_raw.html
+
+# PowerShell artifacts
+*.ps1xml
+
+# Editor files
+.vs/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
