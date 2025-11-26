@@ -4,7 +4,7 @@ A PowerShell utility for exporting season score sheets from NASP Tournaments.
 
 ## Export-SeasonScoreSheet.ps1
 
-This script logs into the NASP Tournaments website, navigates to the Season Score Sheet page, and exports the data to a CSV file. The exported file is saved in a "Season Score Sheets/{SchoolName}" folder structure.
+This script logs into the NASP Tournaments website, navigates to the Season Score Sheet page, and exports the data to a CSV file. The exported file is saved in an organized folder structure: "Season Score Sheets/{SchoolName}/{Season}". The script automatically extracts the school name from the website and handles multiple export methods for maximum compatibility.
 
 ### Requirements
 
@@ -62,17 +62,43 @@ $cred = Get-Credential
 
 ### Output
 
-The script creates the following folder structure:
+The script creates the following organized folder structure:
 
 ```
 {OutputPath}/
 └── Season Score Sheets/
     └── {SchoolName}/
-        └── SeasonScoreSheet_{Season}_{Timestamp}.csv
+        └── {Season}/
+            └── SeasonScoreSheet_{Season}_{Timestamp}.csv
 ```
+
+**Example:**
+```
+C:\MyExports/
+└── Season Score Sheets/
+    └── Sample_High_School/
+        └── 2023-2024/
+            └── SeasonScoreSheet_2023-2024_20231126_143022.csv
+```
+
+### Features
+
+- **Automatic School Detection**: Extracts school name from the website and creates clean folder names
+- **Season Management**: Automatically uses the default season or allows selection of a specific season
+- **Robust Export Methods**: 
+  - Primary: Direct CSV export from the website
+  - Fallback: HTML table parsing when direct export is unavailable
+- **Error Handling**: Comprehensive error handling with detailed feedback
+- **Clean File Naming**: Removes invalid characters from school names and creates timestamped files
 
 ### Notes
 
-- The script maintains a web session to handle authentication cookies
-- ASP.NET ViewState and EventValidation tokens are handled automatically
-- If direct CSV export is not available, the script will attempt to parse table data from the HTML page
+- **Authentication**: The script maintains a web session to handle authentication cookies securely
+- **ASP.NET Compatibility**: ViewState and EventValidation tokens are handled automatically for proper form submissions
+- **Multiple Export Methods**: 
+  - Attempts direct CSV export first for optimal performance
+  - Falls back to HTML table parsing if direct export is unavailable
+  - Handles various table formats and nested HTML content
+- **Smart Season Selection**: Only performs postback operations when a different season is explicitly requested
+- **File Safety**: School names are automatically cleaned to remove invalid file system characters
+- **Organized Storage**: Creates nested folder structure by school and season for easy organization

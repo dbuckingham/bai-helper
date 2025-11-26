@@ -238,18 +238,24 @@ try {
     if ($CsvContent) {
         # Create output directory structure
         $OutputFolder = Join-Path -Path $OutputPath -ChildPath "Season Score Sheets"
+
         $SchoolFolder = Join-Path -Path $OutputFolder -ChildPath $SchoolNameClean
-        
         if (-not (Test-Path -Path $SchoolFolder)) {
             New-Item -Path $SchoolFolder -ItemType Directory -Force | Out-Null
             Write-Host "Created folder: $SchoolFolder" -ForegroundColor Cyan
+        }
+
+        $SeasonFolder = Join-Path -Path $SchoolFolder -ChildPath ($Season -replace '\s+', '_')
+        if (-not (Test-Path -Path $SeasonFolder)) {
+            New-Item -Path $SeasonFolder -ItemType Directory -Force | Out-Null
+            Write-Host "Created folder: $SeasonFolder" -ForegroundColor Cyan
         }
         
         # Generate filename with timestamp
         $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $SeasonSuffix = if ($Season) { "_$($Season -replace '\s+', '_')" } else { "" }
         $OutputFileName = "SeasonScoreSheet${SeasonSuffix}_$Timestamp.csv"
-        $OutputFilePath = Join-Path -Path $SchoolFolder -ChildPath $OutputFileName
+        $OutputFilePath = Join-Path -Path $SeasonFolder -ChildPath $OutputFileName
         
         # Save the CSV file
         if ($CsvContent -is [byte[]]) {
