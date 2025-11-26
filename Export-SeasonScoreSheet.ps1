@@ -84,49 +84,26 @@ try {
     Write-Host "Connecting to NASP Tournaments..." -ForegroundColor Yellow
     
     # First, get the login page to retrieve any necessary tokens (like __VIEWSTATE)
-    $LoginPageResponse = Invoke-WebRequest -Uri $LoginUrl -SessionVariable WebSession -UseBasicParsing
+    $LoginPageResponse = Invoke-WebRequest -Uri $LoginUrl -SessionVariable $WebSession -UseBasicParsing
     
-    # Parse the form to get __EVENTTARGET, __EVENTARGUMENT, __VIEWSTATE, __VIEWSTATEGENERATOR, __EVENTVALIDATION
-    $EventTarget = ""
-    $EventArgument = ""
-    $ViewState = ""
-    $ViewStateGenerator = ""
-    $EventValidation = ""
-    
-    # Try to extract hidden fields from the login page
-    if ($LoginPageResponse.Content -match 'id="__EVENTTARGET"\s+value="([^"]*)"') {
-        $EventTarget = $Matches[1]
-    }
-    if ($LoginPageResponse.Content -match 'id="__EVENTARGUMENT"\s+value="([^"]*)"') {
-        $EventArgument = $Matches[1]
-    }
-    if ($LoginPageResponse.Content -match 'id="__VIEWSTATE"\s+value="([^"]*)"') {
-        $ViewState = $Matches[1]
-    }
-    if ($LoginPageResponse.Content -match 'id="__VIEWSTATEGENERATOR"\s+value="([^"]*)"') {
-        $ViewStateGenerator = $Matches[1]
-    }
-    if ($LoginPageResponse.Content -match 'id="__EVENTVALIDATION"\s+value="([^"]*)"') {
-        $EventValidation = $Matches[1]
+    # Extract all form fields including hidden ones
+    $formFields = @{}
+        
+    # Get all input fields
+    $LoginPageResponse.InputFields | ForEach-Object {
+        if ($_.name -and $_.name -ne "") {
+            $formFields[$_.name] = $_.value
+        }
     }
 
-    # Prepare login form data
-    # Note: The actual field names may vary - these are common ASP.NET patterns
-    $LoginBody = @{
-        "__EVENTTARGET" = $EventTarget
-        "__EVENTARGUMENT" = $EventArgument
-        "__VIEWSTATE" = $ViewState
-        "__VIEWSTATEGENERATOR" = $ViewStateGenerator
-        "__EVENTVALIDATION" = $EventValidation
-        "ctl00`$ContentPlaceHolder1`$TextBox_username" = $Username
-        "ctl00`$ContentPlaceHolder1`$TextBox_password" = $Password
-        "ctl00`$ContentPlaceHolder1`$Button_login" = "Sign In"
-    }
-    
+    # Set username and password fields
+    $formFields["ctl00`$ContentPlaceHolder1`$TextBox_username"] = $Username
+    $formFields["ctl00`$ContentPlaceHolder1`$TextBox_password"] = $Password
+
     Write-Host "Logging in as $Username..." -ForegroundColor Yellow
     
     # Submit the login form
-    $LoginResponse = Invoke-WebRequest -Uri $LoginUrl -Method POST -Body $LoginBody -WebSession $WebSession -UseBasicParsing
+    $LoginResponse = Invoke-WebRequest -Uri $LoginUrl -Method POST -Body $formFields -WebSession $WebSession -UseBasicParsing
     
     # Check if login was successful using the HTTP status code
     if ($LoginResponse.StatusCode -ne 200) {
@@ -144,11 +121,7 @@ try {
     $SchoolName = "Unknown School"
     if ($ScoreSheetResponse.Content -match '<span[^>]*id="ctl00_ContentPlaceHolder1_Label_school_name"[^>]*>([^<]+)</span>') {
         $SchoolName = $Matches[1].Trim()
-    } elseif ($ScoreSheetResponse.Content -match 'id="[^"]*Label_school_name[^"]*"[^>]*>([^<]+)<') {
-        $SchoolName = $Matches[1].Trim()
-    } elseif ($ScoreSheetResponse.Content -match '<span[^>]*id="[^"]*lblSchoolName[^"]*"[^>]*>([^<]+)</span>') {
-        $SchoolName = $Matches[1].Trim()
-    }
+    } 
     
     # Clean the school name for use in file paths
     $SchoolNameClean = $SchoolName -replace '[<>:"/\\|?*\[\]]', '_'
@@ -159,21 +132,16 @@ try {
     
     Write-Host "School: $SchoolName" -ForegroundColor Cyan
     
-    # Extract form fields for postback
-    $ScoreSheetViewState = ""
-    $ScoreSheetViewStateGenerator = ""
-    $ScoreSheetEventValidation = ""
-    
-    if ($ScoreSheetResponse.Content -match 'id="__VIEWSTATE"\s+value="([^"]*)"') {
-        $ScoreSheetViewState = $Matches[1]
+    # Extract all form fields including hidden ones
+    $formFields = @{}
+        
+    # Get all input fields
+    $ScoreSheetResponse.InputFields | ForEach-Object {
+        if ($_.name -and $_.name -ne "") {
+            $formFields[$_.name] = $_.value
+        }
     }
-    if ($ScoreSheetResponse.Content -match 'id="__VIEWSTATEGENERATOR"\s+value="([^"]*)"') {
-        $ScoreSheetViewStateGenerator = $Matches[1]
-    }
-    if ($ScoreSheetResponse.Content -match 'id="__EVENTVALIDATION"\s+value="([^"]*)"') {
-        $ScoreSheetEventValidation = $Matches[1]
-    }
-    
+
     # Find the season dropdown and extract default value if not provided
     $SeasonDropdownId = ""
     if ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*Season[^"]*)"') {
@@ -193,14 +161,14 @@ try {
     
     if (-not $Season) {
         $Season = $DefaultSeason
-        Write-Host "Using default season: $Season" -ForegroundColor Cyan
+        # Write-Host "Using default season: $Season" -ForegroundColor Cyan
     }
     
     # Only perform postback if user specified a different season than the default
     $NeedsPostback = $Season -and ($Season -ne $DefaultSeason)
     
     if ($NeedsPostback) {
-        Write-Host "Selecting season: $Season..." -ForegroundColor Yellow
+        Write-Host "Selecting $Season season from drop down..." -ForegroundColor Yellow
         
         # Find the season value
         $SeasonValue = ""
@@ -211,76 +179,53 @@ try {
         } elseif ($ScoreSheetResponse.Content -match $SeasonPattern2) {
             $SeasonValue = $Matches[1]
         }
-        
+
         if ($SeasonValue -and $SeasonDropdownId) {
             # Convert ASP.NET client ID to server control ID format for form field name
-            $SeasonDropdownName = $SeasonDropdownId -replace '_', '`$'
+            $SeasonDropdownName = $SeasonDropdownId -replace '_', '$'
+            $SeasonDropdownName = $SeasonDropdownName -replace '\$season', '_season'
+
+            $formFields["__EVENTTARGET"] = $SeasonDropdownName
+            $formFields["__EVENTARGUMENT"] = ""
+            $formFields[$SeasonDropdownName] = $SeasonValue
+
+            Write-Host "Performing postback to select $Season season..." -ForegroundColor Yellow
+            $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $formFields -WebSession $WebSession -UseBasicParsing
             
-            # Perform postback to update the data table with the selected season
-            $SeasonSelectBody = @{
-                "__VIEWSTATE" = $ScoreSheetViewState
-                "__VIEWSTATEGENERATOR" = $ScoreSheetViewStateGenerator
-                "__EVENTVALIDATION" = $ScoreSheetEventValidation
-                "__EVENTTARGET" = $SeasonDropdownId  # Use client ID format for __EVENTTARGET
-                "__EVENTARGUMENT" = ""
-                $SeasonDropdownName = $SeasonValue
-            }
-            
-            Write-Host "Performing postback to update data table..." -ForegroundColor Yellow
-            $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $SeasonSelectBody -WebSession $WebSession -UseBasicParsing
-            
-            # Re-extract form fields after season selection postback
-            if ($ScoreSheetResponse.Content -match 'id="__VIEWSTATE"\s+value="([^"]*)"') {
-                $ScoreSheetViewState = $Matches[1]
-            }
-            if ($ScoreSheetResponse.Content -match 'id="__VIEWSTATEGENERATOR"\s+value="([^"]*)"') {
-                $ScoreSheetViewStateGenerator = $Matches[1]
-            }
-            if ($ScoreSheetResponse.Content -match 'id="__EVENTVALIDATION"\s+value="([^"]*)"') {
-                $ScoreSheetEventValidation = $Matches[1]
-            }
-            
-            Write-Host "Season selected: $Season" -ForegroundColor Green
+            Write-Host "Postback successful!" -ForegroundColor Green
         } else {
             Write-Warning "Could not find season '$Season' in dropdown. Using default season."
             $Season = $DefaultSeason
         }
-    } else {
-        Write-Host "Using season: $Season" -ForegroundColor Cyan
-    }
-    
+    } 
+
+    Write-Host "Season: $Season" -ForegroundColor Cyan
+
     # Find and click the export button
     Write-Host "Exporting score sheet to CSV..." -ForegroundColor Yellow
     
     $ExportButtonName = "ctl00`$ContentPlaceHolder1`$Button_export"
 
-    # Build export request body
-    $ExportBody = @{
-        "__VIEWSTATE" = $ScoreSheetViewState
-        "__VIEWSTATEGENERATOR" = $ScoreSheetViewStateGenerator
-        "__EVENTVALIDATION" = $ScoreSheetEventValidation
+    # Get all input fields
+    $ScoreSheetResponse.InputFields | ForEach-Object {
+        if ($_.name -and $_.name -ne "") {
+            $formFields[$_.name] = $_.value
+        }
     }
-    
-    if ($ExportButtonName) {
-        $ExportBody[$ExportButtonName] = "Export"
-    } else {
-        # Try common ASP.NET button names
-        $ExportBody["ctl00`$ContentPlaceHolder1`$btnExport"] = "Export"
+
+    if($SeasonDropdownName -and $SeasonValue) {
+        $formFields[$SeasonDropdownName] = $SeasonValue
     }
-    
+    $formFields[$ExportButtonName] = "Export"
+
     # Make the export request
-    $ExportResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $ExportBody -WebSession $WebSession -UseBasicParsing
-    
+    $ExportResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $formFields -WebSession $WebSession -UseBasicParsing
+
     # Check if we got CSV content
     $ContentType = $ExportResponse.Headers["Content-Type"]
     $ContentDisposition = $ExportResponse.Headers["Content-Disposition"]
     
     $CsvContent = $null
-    $FileName = "SeasonScoreSheet.csv"
-    
-    if (($ContentDisposition -join " ") -match 'filename="?([^";]+)"?') {
-        $FileName = $Matches[1]
-    }
     
     # Check if the response is CSV data
     if ($ContentType -match "text/csv|application/csv|application/octet-stream" -or $ContentDisposition) {
