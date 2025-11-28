@@ -76,6 +76,7 @@ $Script:Config = @{
         Username = "ctl00`$ContentPlaceHolder1`$TextBox_username"
         Password = "ctl00`$ContentPlaceHolder1`$TextBox_password"
         ExportButton = "ctl00`$ContentPlaceHolder1`$Button_export"
+        ReturnToSchoolButton = "ctl00`$ContentPlaceHolder1`$Button_return_school"
         SchoolLabel = "ctl00_ContentPlaceHolder1_Label_school_name"
     }
     
@@ -102,7 +103,7 @@ $Script:Config = @{
 }
 
 # Script-scoped variables
-$Script:WebSession = $null
+$Script:WebSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $Script:LoginUrl = "$($Script:Config.BaseUrl)$($Script:Config.LoginPath)"
 $Script:ScoreSheetUrl = "$($Script:Config.BaseUrl)$($Script:Config.ScoreSheetPath)?oid=$OrganizationId"
 #endregion
@@ -235,8 +236,7 @@ function Initialize-WebSession {
     Write-StatusMessage "Connecting to NASP Tournaments..." -Level Information
     
     try {
-        $loginPageResponse = Invoke-WebRequest -Uri $Script:LoginUrl -SessionVariable sessionVar -UseBasicParsing -ErrorAction Stop
-        $Script:WebSession = $sessionVar
+        $loginPageResponse = Invoke-WebRequest -Uri $Script:LoginUrl -SessionVariable $Script:WebSession -UseBasicParsing -ErrorAction Stop
         return $loginPageResponse
     }
     catch {
@@ -387,7 +387,7 @@ function Get-SeasonInformation {
     elseif ($Response.Content -match $Script:Config.Patterns.DefaultSeason2) {
         $defaultSeason = $Matches[1].Trim()
     }
-    
+
     # Determine selected season
     $selectedSeason = if ($RequestedSeason) { $RequestedSeason } else { $defaultSeason }
     $needsPostback = $RequestedSeason -and ($RequestedSeason -ne $defaultSeason)
@@ -450,11 +450,13 @@ function Set-SeasonSelection {
         
         # Remove export button to prevent accidental export
         $formFields.Remove($Script:Config.Controls.ExportButton)
-        
+        $formFields.Remove($Script:Config.Controls.ReturnToSchoolButton)
+
         Write-StatusMessage "Performing postback to select season..." -Level Information
         $updatedResponse = Invoke-WebRequest -Uri $Script:ScoreSheetUrl -Method POST -Body $formFields -WebSession $Script:WebSession -UseBasicParsing -ErrorAction Stop
         
         Write-StatusMessage "Season selection successful!" -Level Success
+
         return $updatedResponse
     }
     catch {
@@ -483,6 +485,7 @@ function Export-ScoreSheetData {
     
     try {
         $formFields = Get-FormFields -Response $Response
+        $formFields.Remove($Script:Config.Controls.ReturnToSchoolButton)
         
         # Add season selection if needed
         if ($SeasonInfo.NeedsPostback -and $SeasonInfo.DropdownId) {
@@ -626,12 +629,16 @@ function Save-CsvData {
         [string]$OutputDirectory,
         
         [Parameter(Mandatory = $true)]
+        [string]$School,
+
+        [Parameter(Mandatory = $true)]
         [string]$Season
     )
     
-    $timestamp = Get-Date -Format $Script:Config.FileSettings.TimestampFormat
+    # $timestamp = Get-Date -Format $Script:Config.FileSettings.TimestampFormat
+    $schoolSafe = Get-SafeFileName -FileName $School
     $seasonSafe = Get-SafeFileName -FileName $Season
-    $fileName = "SeasonScoreSheet_${seasonSafe}_$timestamp.csv"
+    $fileName = "SeasonScoreSheet_${schoolSafe}_${seasonSafe}.csv"
     $filePath = Join-Path -Path $OutputDirectory -ChildPath $fileName
     
     try {
@@ -699,6 +706,7 @@ try {
     
     # Initialize session and login
     $loginPageResponse = Initialize-WebSession
+
     Invoke-Login -Credential $credential -LoginPageResponse $loginPageResponse
     
     # Get score sheet page
@@ -726,7 +734,7 @@ try {
     
     if ($csvContent) {
         # Save CSV data directly
-        $outputFilePath = Save-CsvData -CsvContent $csvContent -OutputDirectory $outputDirectory -Season $seasonInfo.SelectedSeason
+        $outputFilePath = Save-CsvData -CsvContent $csvContent -OutputDirectory $outputDirectory -School $schoolInfo.Name -Season $seasonInfo.SelectedSeason
     }
     else {
         # Try to parse HTML table data
