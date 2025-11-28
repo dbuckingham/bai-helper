@@ -23,338 +23,730 @@
     Defaults to the current directory.
 
 .EXAMPLE
-    .\Export-SeasonScoreSheet.ps1
+    .\Export-SeasonScoreSheet-Refactored.ps1
     Prompts for credentials and exports the default season score sheet.
 
 .EXAMPLE
-    .\Export-SeasonScoreSheet.ps1 -Credential (Get-Credential)
+    .\Export-SeasonScoreSheet-Refactored.ps1 -Credential (Get-Credential)
     Uses provided credentials to export the default season score sheet.
 
 .EXAMPLE
-    .\Export-SeasonScoreSheet.ps1 -Season "2023-2024"
+    .\Export-SeasonScoreSheet-Refactored.ps1 -Season "2023-2024"
     Exports the score sheet for the specified season.
 
 .NOTES
     Author: BAI Helper
+    Version: 2.0 (Refactored)
     Requires: PowerShell 5.1 or later
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
+    [ValidateNotNull()]
     [System.Management.Automation.PSCredential]
     $Credential,
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]
     $Season,
 
     [Parameter(Mandatory = $false)]
+    [ValidateRange(1, 99999)]
     [int]
     $OrganizationId = 5232,
 
     [Parameter(Mandatory = $false)]
+    [ValidateScript({Test-Path $_ -IsValid})]
     [string]
     $OutputPath = (Get-Location).Path
 )
 
-# Base URLs
-$LoginUrl = "https://nasptournaments.org/userutilities/login.aspx"
-$ScoreSheetUrl = "https://nasptournaments.org/Schoolmgr/SeasonScoreSheet.aspx?oid=$OrganizationId"
-
-# If credentials not provided, prompt the user
-if (-not $Credential) {
-    Write-Host "Please enter your NASP Tournaments credentials:" -ForegroundColor Cyan
-    $Credential = Get-Credential -Message "Enter your NASP Tournaments username and password"
+#region Configuration
+# Application Configuration
+$Script:Config = @{
+    # Base URLs
+    BaseUrl = "https://nasptournaments.org"
+    LoginPath = "/userutilities/login.aspx"
+    ScoreSheetPath = "/Schoolmgr/SeasonScoreSheet.aspx"
     
-    if (-not $Credential) {
-        Write-Error "Credentials are required to proceed."
-        exit 1
+    # ASP.NET Control IDs
+    Controls = @{
+        Username = "ctl00`$ContentPlaceHolder1`$TextBox_username"
+        Password = "ctl00`$ContentPlaceHolder1`$TextBox_password"
+        ExportButton = "ctl00`$ContentPlaceHolder1`$Button_export"
+        ReturnToSchoolButton = "ctl00`$ContentPlaceHolder1`$Button_return_school"
+        SchoolLabel = "ctl00_ContentPlaceHolder1_Label_school_name"
+    }
+    
+    # Regex Patterns for HTML parsing
+    Patterns = @{
+        SchoolName = '<span[^>]*id="ctl00_ContentPlaceHolder1_Label_school_name"[^>]*>([^<]+)</span>'
+        SeasonDropdown1 = '<select[^>]*id="([^"]*Season[^"]*)"'
+        SeasonDropdown2 = '<select[^>]*id="([^"]*ddl[^"]*)"'
+        DefaultSeason1 = '<option[^>]*selected[^>]*>([^<]+)</option>'
+        DefaultSeason2 = '<select[^>]*id="[^"]*Season[^"]*"[^>]*>[\s\S]*?<option[^>]*value="[^"]*"[^>]*>([^<]+)</option>'
+        DataTable = '<table[^>]*(?:class="[^"]*(?:grid|data|score)[^"]*"|id="[^"]*(?:gv|grid|tbl)[^"]*")[^>]*>([\s\S]*?)</table>'
+        TableHeader = '<th[^>]*>([\s\S]*?)</th>'
+        TableRow = '<tr[^>]*>([\s\S]*?)</tr>'
+        TableCell = '<td[^>]*>([\s\S]*?)</td>'
+        CsvContent = '^[\w\s,"]+\r?\n'
+    }
+    
+    # File and path settings
+    FileSettings = @{
+        InvalidPathChars = '[<>:"/\\|?*\[\]]'
+        TimestampFormat = "yyyyMMdd_HHmmss"
+        Encoding = "UTF8"
     }
 }
 
-# Extract username and password from credential
-$Username = $Credential.UserName
-$Password = $Credential.GetNetworkCredential().Password
+# Script-scoped variables
+$Script:WebSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$Script:LoginUrl = "$($Script:Config.BaseUrl)$($Script:Config.LoginPath)"
+$Script:ScoreSheetUrl = "$($Script:Config.BaseUrl)$($Script:Config.ScoreSheetPath)?oid=$OrganizationId"
+#endregion
 
-# Create a web session to maintain cookies
-$WebSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+#region Helper Functions
+function Write-StatusMessage {
+    <#
+    .SYNOPSIS
+        Writes a standardized status message.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+        
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Information', 'Warning', 'Error', 'Success')]
+        [string]$Level = 'Information'
+    )
+    
+    $color = switch ($Level) {
+        'Information' { 'Cyan' }
+        'Warning' { 'Yellow' }
+        'Error' { 'Red' }
+        'Success' { 'Green' }
+        default { 'White' }
+    }
+    
+    Write-Host $Message -ForegroundColor $color
+    Write-Verbose $Message
+}
 
-try {
-    Write-Host "Connecting to NASP Tournaments..." -ForegroundColor Yellow
+function Get-CleanText {
+    <#
+    .SYNOPSIS
+        Strips HTML tags and decodes HTML entities from text.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$HtmlText
+    )
     
-    # First, get the login page to retrieve any necessary tokens (like __VIEWSTATE)
-    $LoginPageResponse = Invoke-WebRequest -Uri $LoginUrl -SessionVariable $WebSession -UseBasicParsing
+    if ([string]::IsNullOrWhiteSpace($HtmlText)) {
+        return ""
+    }
     
-    # Extract all form fields including hidden ones
+    # Remove HTML tags
+    $text = $HtmlText -replace '<[^>]+>', ''
+    
+    # Decode common HTML entities
+    $entityMap = @{
+        '&nbsp;' = ' '
+        '&amp;' = '&'
+        '&lt;' = '<'
+        '&gt;' = '>'
+        '&quot;' = '"'
+        '&#39;' = "'"
+        '&apos;' = "'"
+    }
+    
+    foreach ($entity in $entityMap.GetEnumerator()) {
+        $text = $text -replace [regex]::Escape($entity.Key), $entity.Value
+    }
+    
+    # Handle numeric entities
+    $text = $text -replace '&#(\d+);', { [char][int]$_.Groups[1].Value }
+    
+    return $text.Trim()
+}
+
+function Get-SafeFileName {
+    <#
+    .SYNOPSIS
+        Creates a safe filename by removing invalid characters.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName,
+        
+        [Parameter(Mandatory = $false)]
+        [string]$Replacement = '_'
+    )
+    
+    if ([string]::IsNullOrWhiteSpace($FileName)) {
+        return "Unknown"
+    }
+    
+    $safeName = $FileName -replace $Script:Config.FileSettings.InvalidPathChars, $Replacement
+    return $safeName.Trim()
+}
+#endregion
+
+#region Authentication Functions
+function Get-UserCredentials {
+    <#
+    .SYNOPSIS
+        Gets or prompts for user credentials.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [System.Management.Automation.PSCredential]$Credential
+    )
+    
+    if ($Credential) {
+        return $Credential
+    }
+    
+    Write-StatusMessage "Please enter your NASP Tournaments credentials:" -Level Information
+    $promptedCredential = Get-Credential -Message "Enter your NASP Tournaments username and password"
+    
+    if (-not $promptedCredential) {
+        throw "Credentials are required to proceed."
+    }
+    
+    return $promptedCredential
+}
+
+function Initialize-WebSession {
+    <#
+    .SYNOPSIS
+        Initializes the web session by getting the login page.
+    #>
+    [CmdletBinding()]
+    param()
+    
+    Write-StatusMessage "Connecting to NASP Tournaments..." -Level Information
+    
+    try {
+        $loginPageResponse = Invoke-WebRequest -Uri $Script:LoginUrl -SessionVariable $Script:WebSession -UseBasicParsing -ErrorAction Stop
+        return $loginPageResponse
+    }
+    catch {
+        throw "Failed to connect to NASP Tournaments: $($_.Exception.Message)"
+    }
+}
+
+function Get-FormFields {
+    <#
+    .SYNOPSIS
+        Extracts form fields from a web response.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response
+    )
+    
     $formFields = @{}
-        
-    # Get all input fields
-    $LoginPageResponse.InputFields | ForEach-Object {
-        if ($_.name -and $_.name -ne "") {
-            $formFields[$_.name] = $_.value
+    
+    foreach ($field in $Response.InputFields) {
+        if ($field.name -and $field.name -ne "") {
+            $formFields[$field.name] = $field.value
         }
     }
+    
+    return $formFields
+}
 
-    # Set username and password fields
-    $formFields["ctl00`$ContentPlaceHolder1`$TextBox_username"] = $Username
-    $formFields["ctl00`$ContentPlaceHolder1`$TextBox_password"] = $Password
-
-    Write-Host "Logging in as $Username..." -ForegroundColor Yellow
-    
-    # Submit the login form
-    $LoginResponse = Invoke-WebRequest -Uri $LoginUrl -Method POST -Body $formFields -WebSession $WebSession -UseBasicParsing
-    
-    # Check if login was successful using the HTTP status code
-    if ($LoginResponse.StatusCode -ne 200) {
-        Write-Error "Login failed with status code: $($LoginResponse.StatusCode). Please check your credentials."
-        exit 1
-    }
-    
-    Write-Host "Login successful!" -ForegroundColor Green
-
-    # Navigate to the Season Score Sheet page
-    Write-Host "Navigating to Season Score Sheet page..." -ForegroundColor Yellow
-    $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -WebSession $WebSession -UseBasicParsing
-
-    # Extract school name from the page by searching for the Label_school_name element
-    $SchoolName = "Unknown School"
-    if ($ScoreSheetResponse.Content -match '<span[^>]*id="ctl00_ContentPlaceHolder1_Label_school_name"[^>]*>([^<]+)</span>') {
-        $SchoolName = $Matches[1].Trim()
-    } 
-    
-    # Clean the school name for use in file paths
-    $SchoolNameClean = $SchoolName -replace '[<>:"/\\|?*\[\]]', '_'
-    $SchoolNameClean = $SchoolNameClean.Trim()
-    if ([string]::IsNullOrWhiteSpace($SchoolNameClean)) {
-        $SchoolNameClean = "Organization_$OrganizationId"
-    }
-    
-    Write-Host "School: $SchoolName" -ForegroundColor Cyan
-    
-    # Extract all form fields including hidden ones
-    $formFields = @{}
+function Invoke-Login {
+    <#
+    .SYNOPSIS
+        Performs login to the NASP Tournaments website.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Management.Automation.PSCredential]$Credential,
         
-    # Get all input fields
-    $ScoreSheetResponse.InputFields | ForEach-Object {
-        if ($_.name -and $_.name -ne "") {
-            $formFields[$_.name] = $_.value
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$LoginPageResponse
+    )
+    
+    # Extract form fields from login page
+    $formFields = Get-FormFields -Response $LoginPageResponse
+    
+    # Set credentials
+    $formFields[$Script:Config.Controls.Username] = $Credential.UserName
+    $formFields[$Script:Config.Controls.Password] = $Credential.GetNetworkCredential().Password
+
+    Write-StatusMessage "Logging in as $($Credential.UserName)..." -Level Information
+    
+    try {
+        $loginResponse = Invoke-WebRequest -Uri $Script:LoginUrl -Method POST -Body $formFields -WebSession $Script:WebSession -UseBasicParsing -ErrorAction Stop
+        
+        if ($loginResponse.StatusCode -eq 200) {
+            Write-StatusMessage "Login successful!" -Level Success
+            return $loginResponse
+        }
+        else {
+            throw "Login failed with status code: $($loginResponse.StatusCode)"
         }
     }
+    catch {
+        throw "Login failed: $($_.Exception.Message)"
+    }
+}
+#endregion
 
-    # Find the season dropdown and extract default value if not provided
-    $SeasonDropdownId = ""
-    if ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*Season[^"]*)"') {
-        $SeasonDropdownId = $Matches[1]
-    } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="([^"]*ddl[^"]*)"') {
-        $SeasonDropdownId = $Matches[1]
+#region Data Extraction Functions
+function Get-ScoreSheetPage {
+    <#
+    .SYNOPSIS
+        Navigates to the Season Score Sheet page.
+    #>
+    [CmdletBinding()]
+    param()
+    
+    Write-StatusMessage "Navigating to Season Score Sheet page..." -Level Information
+    
+    try {
+        $scoreSheetResponse = Invoke-WebRequest -Uri $Script:ScoreSheetUrl -WebSession $Script:WebSession -UseBasicParsing -ErrorAction Stop
+        return $scoreSheetResponse
+    }
+    catch {
+        throw "Failed to navigate to score sheet page: $($_.Exception.Message)"
+    }
+}
+
+function Get-SchoolInformation {
+    <#
+    .SYNOPSIS
+        Extracts school information from the score sheet page.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response
+    )
+    
+    $schoolName = "Unknown School"
+    
+    if ($Response.Content -match $Script:Config.Patterns.SchoolName) {
+        $schoolName = $Matches[1].Trim()
     }
     
-    # If Season parameter not provided, extract the default selected value from the dropdown
-    $DefaultSeason = ""
-    if ($ScoreSheetResponse.Content -match '<option[^>]*selected[^>]*>([^<]+)</option>') {
-        $DefaultSeason = $Matches[1].Trim()
-    } elseif ($ScoreSheetResponse.Content -match '<select[^>]*id="[^"]*Season[^"]*"[^>]*>[\s\S]*?<option[^>]*value="[^"]*"[^>]*>([^<]+)</option>') {
-        # Fall back to first option if no selected attribute
-        $DefaultSeason = $Matches[1].Trim()
+    $schoolNameClean = Get-SafeFileName -FileName $schoolName
+    if ([string]::IsNullOrWhiteSpace($schoolNameClean)) {
+        $schoolNameClean = "Organization_$OrganizationId"
     }
     
-    if (-not $Season) {
-        $Season = $DefaultSeason
-        # Write-Host "Using default season: $Season" -ForegroundColor Cyan
+    Write-StatusMessage "School: $schoolName" -Level Information
+    
+    return @{
+        Name = $schoolName
+        SafeName = $schoolNameClean
     }
-    
-    # Only perform postback if user specified a different season than the default
-    $NeedsPostback = $Season -and ($Season -ne $DefaultSeason)
-    
-    if ($NeedsPostback) {
-        Write-Host "Selecting $Season season from drop down..." -ForegroundColor Yellow
+}
+
+function Get-SeasonInformation {
+    <#
+    .SYNOPSIS
+        Extracts season information from the score sheet page.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response,
         
-        # Find the season value
-        $SeasonValue = ""
-        $SeasonPattern1 = '<option[^>]*value="([^"]*)"[^>]*>' + [regex]::Escape($Season) + '</option>'
-        $SeasonPattern2 = '<option[^>]*value="([^"]*)"[^>]*>[^<]*' + [regex]::Escape($Season) + '[^<]*</option>'
-        if ($ScoreSheetResponse.Content -match $SeasonPattern1) {
-            $SeasonValue = $Matches[1]
-        } elseif ($ScoreSheetResponse.Content -match $SeasonPattern2) {
-            $SeasonValue = $Matches[1]
-        }
+        [Parameter(Mandatory = $false)]
+        [string]$RequestedSeason
+    )
+    
+    # Find season dropdown ID
+    $dropdownId = ""
+    if ($Response.Content -match $Script:Config.Patterns.SeasonDropdown1) {
+        $dropdownId = $Matches[1]
+    }
+    elseif ($Response.Content -match $Script:Config.Patterns.SeasonDropdown2) {
+        $dropdownId = $Matches[1]
+    }
+    
+    # Find default season
+    $defaultSeason = ""
+    if ($Response.Content -match $Script:Config.Patterns.DefaultSeason1) {
+        $defaultSeason = $Matches[1].Trim()
+    }
+    elseif ($Response.Content -match $Script:Config.Patterns.DefaultSeason2) {
+        $defaultSeason = $Matches[1].Trim()
+    }
 
-        if ($SeasonValue -and $SeasonDropdownId) {
-            # Convert ASP.NET client ID to server control ID format for form field name
-            $SeasonDropdownName = $SeasonDropdownId -replace '_', '$'
-            $SeasonDropdownName = $SeasonDropdownName -replace '\$season', '_season'
+    # Determine selected season
+    $selectedSeason = if ($RequestedSeason) { $RequestedSeason } else { $defaultSeason }
+    $needsPostback = $RequestedSeason -and ($RequestedSeason -ne $defaultSeason)
+    
+    return @{
+        DropdownId = $dropdownId
+        DefaultSeason = $defaultSeason
+        SelectedSeason = $selectedSeason
+        NeedsPostback = $needsPostback
+    }
+}
 
-            $formFields["__EVENTTARGET"] = $SeasonDropdownName
-            $formFields["__EVENTARGUMENT"] = ""
-            $formFields[$SeasonDropdownName] = $SeasonValue
+function Set-SeasonSelection {
+    <#
+    .SYNOPSIS
+        Updates the season selection if needed.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$SeasonInfo,
+        
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response
+    )
+    
+    if (-not $SeasonInfo.NeedsPostback) {
+        return $Response
+    }
+    
+    Write-StatusMessage "Selecting $($SeasonInfo.SelectedSeason) season..." -Level Information
+    
+    # Find season value
+    $seasonValue = ""
+    $pattern1 = '<option[^>]*value="([^"]*)"[^>]*>' + [regex]::Escape($SeasonInfo.SelectedSeason) + '</option>'
+    $pattern2 = '<option[^>]*value="([^"]*)"[^>]*>[^<]*' + [regex]::Escape($SeasonInfo.SelectedSeason) + '[^<]*</option>'
+    
+    if ($Response.Content -match $pattern1) {
+        $seasonValue = $Matches[1]
+    }
+    elseif ($Response.Content -match $pattern2) {
+        $seasonValue = $Matches[1]
+    }
+    
+    if (-not $seasonValue -or -not $SeasonInfo.DropdownId) {
+        Write-StatusMessage "Could not find season '$($SeasonInfo.SelectedSeason)' in dropdown. Using default season." -Level Warning
+        $SeasonInfo.SelectedSeason = $SeasonInfo.DefaultSeason
+        return $Response
+    }
+    
+    try {
+        # Prepare form for postback
+        $formFields = Get-FormFields -Response $Response
+        $dropdownName = $SeasonInfo.DropdownId -replace '_', '$'
+        $dropdownName = $dropdownName -replace '\$season', '_season'
+        
+        $formFields["__EVENTTARGET"] = $dropdownName
+        $formFields["__EVENTARGUMENT"] = ""
+        $formFields[$dropdownName] = $seasonValue
+        
+        # Remove export button to prevent accidental export
+        $formFields.Remove($Script:Config.Controls.ExportButton)
+        $formFields.Remove($Script:Config.Controls.ReturnToSchoolButton)
 
-            Write-Host "Performing postback to select $Season season..." -ForegroundColor Yellow
-            $ScoreSheetResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $formFields -WebSession $WebSession -UseBasicParsing
+        Write-StatusMessage "Performing postback to select season..." -Level Information
+        $updatedResponse = Invoke-WebRequest -Uri $Script:ScoreSheetUrl -Method POST -Body $formFields -WebSession $Script:WebSession -UseBasicParsing -ErrorAction Stop
+        
+        Write-StatusMessage "Season selection successful!" -Level Success
+
+        return $updatedResponse
+    }
+    catch {
+        Write-StatusMessage "Failed to update season selection: $($_.Exception.Message)" -Level Warning
+        return $Response
+    }
+}
+#endregion
+
+#region Export Functions
+function Export-ScoreSheetData {
+    <#
+    .SYNOPSIS
+        Exports the score sheet data by triggering the export button.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$SeasonInfo
+    )
+    
+    Write-StatusMessage "Exporting score sheet data..." -Level Information
+    
+    try {
+        $formFields = Get-FormFields -Response $Response
+        $formFields.Remove($Script:Config.Controls.ReturnToSchoolButton)
+        
+        # Add season selection if needed
+        if ($SeasonInfo.NeedsPostback -and $SeasonInfo.DropdownId) {
+            $dropdownName = $SeasonInfo.DropdownId -replace '_', '$'
+            $dropdownName = $dropdownName -replace '\$season', '_season'
             
-            Write-Host "Postback successful!" -ForegroundColor Green
-        } else {
-            Write-Warning "Could not find season '$Season' in dropdown. Using default season."
-            $Season = $DefaultSeason
-        }
-    } 
-
-    Write-Host "Season: $Season" -ForegroundColor Cyan
-
-    # Find and click the export button
-    Write-Host "Exporting score sheet to CSV..." -ForegroundColor Yellow
-    
-    $ExportButtonName = "ctl00`$ContentPlaceHolder1`$Button_export"
-
-    # Get all input fields
-    $ScoreSheetResponse.InputFields | ForEach-Object {
-        if ($_.name -and $_.name -ne "") {
-            $formFields[$_.name] = $_.value
-        }
-    }
-
-    if($SeasonDropdownName -and $SeasonValue) {
-        $formFields[$SeasonDropdownName] = $SeasonValue
-    }
-    $formFields[$ExportButtonName] = "Export"
-
-    # Make the export request
-    $ExportResponse = Invoke-WebRequest -Uri $ScoreSheetUrl -Method POST -Body $formFields -WebSession $WebSession -UseBasicParsing
-
-    # Check if we got CSV content
-    $ContentType = $ExportResponse.Headers["Content-Type"]
-    $ContentDisposition = $ExportResponse.Headers["Content-Disposition"]
-    
-    $CsvContent = $null
-    
-    # Check if the response is CSV data
-    if ($ContentType -match "text/csv|application/csv|application/octet-stream" -or $ContentDisposition) {
-        $CsvContent = $ExportResponse.Content
-    } elseif ($ExportResponse.Content -match '^[\w\s,"]+\r?\n') {
-        # Response might be CSV without proper headers
-        $CsvContent = $ExportResponse.Content
-    }
-    
-    if ($CsvContent) {
-        # Create output directory structure
-        $OutputFolder = Join-Path -Path $OutputPath -ChildPath "Season Score Sheets"
-
-        $SchoolFolder = Join-Path -Path $OutputFolder -ChildPath $SchoolNameClean
-        if (-not (Test-Path -Path $SchoolFolder)) {
-            New-Item -Path $SchoolFolder -ItemType Directory -Force | Out-Null
-            Write-Host "Created folder: $SchoolFolder" -ForegroundColor Cyan
-        }
-
-        $SeasonFolder = Join-Path -Path $SchoolFolder -ChildPath ($Season -replace '\s+', '_')
-        if (-not (Test-Path -Path $SeasonFolder)) {
-            New-Item -Path $SeasonFolder -ItemType Directory -Force | Out-Null
-            Write-Host "Created folder: $SeasonFolder" -ForegroundColor Cyan
+            # Find season value
+            $seasonPattern = '<option[^>]*value="([^"]*)"[^>]*>' + [regex]::Escape($SeasonInfo.SelectedSeason) + '</option>'
+            if ($Response.Content -match $seasonPattern) {
+                $formFields[$dropdownName] = $Matches[1]
+            }
         }
         
-        # Generate filename with timestamp
-        $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $SeasonSuffix = if ($Season) { "_$($Season -replace '\s+', '_')" } else { "" }
-        $OutputFileName = "SeasonScoreSheet${SeasonSuffix}_$Timestamp.csv"
-        $OutputFilePath = Join-Path -Path $SeasonFolder -ChildPath $OutputFileName
+        # Trigger export
+        $formFields[$Script:Config.Controls.ExportButton] = "Export"
         
-        # Save the CSV file
+        $exportResponse = Invoke-WebRequest -Uri $Script:ScoreSheetUrl -Method POST -Body $formFields -WebSession $Script:WebSession -UseBasicParsing -ErrorAction Stop
+        return $exportResponse
+    }
+    catch {
+        throw "Failed to export score sheet data: $($_.Exception.Message)"
+    }
+}
+
+function Test-CsvResponse {
+    <#
+    .SYNOPSIS
+        Tests if the response contains CSV data.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response
+    )
+    
+    $contentType = $Response.Headers["Content-Type"]
+    $contentDisposition = $Response.Headers["Content-Disposition"]
+    
+    # Check for CSV content type or disposition
+    if ($contentType -match "text/csv|application/csv|application/octet-stream" -or $contentDisposition) {
+        return $Response.Content
+    }
+    
+    # Check if content looks like CSV
+    if ($Response.Content -match $Script:Config.Patterns.CsvContent) {
+        return $Response.Content
+    }
+    
+    return $null
+}
+
+function Get-TableDataFromHtml {
+    <#
+    .SYNOPSIS
+        Extracts table data from HTML content as fallback.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response
+    )
+    
+    Write-StatusMessage "Direct export not available. Parsing HTML table..." -Level Warning
+    
+    $tableData = @()
+    
+    if ($Response.Content -match $Script:Config.Patterns.DataTable) {
+        $tableHtml = $Matches[1]
+        
+        # Extract headers
+        $headers = @()
+        [regex]::Matches($tableHtml, $Script:Config.Patterns.TableHeader) | ForEach-Object {
+            $headers += Get-CleanText -HtmlText $_.Groups[1].Value
+        }
+        
+        # Extract rows
+        [regex]::Matches($tableHtml, $Script:Config.Patterns.TableRow) | ForEach-Object {
+            $rowHtml = $_.Groups[1].Value
+            $rowData = @()
+            
+            [regex]::Matches($rowHtml, $Script:Config.Patterns.TableCell) | ForEach-Object {
+                $rowData += Get-CleanText -HtmlText $_.Groups[1].Value
+            }
+            
+            if ($rowData.Count -gt 0) {
+                $rowObject = [PSCustomObject]@{}
+                for ($i = 0; $i -lt [Math]::Min($headers.Count, $rowData.Count); $i++) {
+                    $headerName = if ([string]::IsNullOrWhiteSpace($headers[$i])) { "Column$i" } else { $headers[$i] }
+                    $rowObject | Add-Member -NotePropertyName $headerName -NotePropertyValue $rowData[$i]
+                }
+                $tableData += $rowObject
+            }
+        }
+    }
+    
+    return $tableData
+}
+#endregion
+
+#region File Operations
+function New-OutputDirectory {
+    <#
+    .SYNOPSIS
+        Creates the output directory structure.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BasePath,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$SchoolInfo,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Season
+    )
+    
+    $baseFolder = Join-Path -Path $BasePath -ChildPath "Season Score Sheets"
+    $schoolFolder = Join-Path -Path $baseFolder -ChildPath $SchoolInfo.SafeName
+    $seasonFolder = Join-Path -Path $schoolFolder -ChildPath (Get-SafeFileName -FileName $Season)
+    
+    if (-not (Test-Path -Path $seasonFolder)) {
+        New-Item -Path $seasonFolder -ItemType Directory -Force | Out-Null
+        Write-StatusMessage "Created folder: $seasonFolder" -Level Information
+    }
+    
+    return $seasonFolder
+}
+
+function Save-CsvData {
+    <#
+    .SYNOPSIS
+        Saves CSV content to a file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CsvContent,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDirectory,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$School,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Season
+    )
+    
+    # $timestamp = Get-Date -Format $Script:Config.FileSettings.TimestampFormat
+    $schoolSafe = Get-SafeFileName -FileName $School
+    $seasonSafe = Get-SafeFileName -FileName $Season
+    $fileName = "SeasonScoreSheet_${schoolSafe}_${seasonSafe}.csv"
+    $filePath = Join-Path -Path $OutputDirectory -ChildPath $fileName
+    
+    try {
         if ($CsvContent -is [byte[]]) {
-            [System.IO.File]::WriteAllBytes($OutputFilePath, $CsvContent)
-        } else {
-            $CsvContent | Out-File -FilePath $OutputFilePath -Encoding UTF8 -Force
+            [System.IO.File]::WriteAllBytes($filePath, $CsvContent)
+        }
+        else {
+            $CsvContent | Out-File -FilePath $filePath -Encoding $Script:Config.FileSettings.Encoding -Force
         }
         
-        Write-Host "Score sheet exported successfully!" -ForegroundColor Green
-        Write-Host "File saved to: $OutputFilePath" -ForegroundColor Cyan
+        Write-StatusMessage "Score sheet exported successfully!" -Level Success
+        Write-StatusMessage "File saved to: $filePath" -Level Information
         
-        return $OutputFilePath
-    } else {
-        # If no CSV was returned, the page might use a different export mechanism
-        # Try to parse the HTML table directly
-        Write-Host "Direct export not available. Attempting to parse table data..." -ForegroundColor Yellow
-        
-        # Helper function to strip HTML tags and decode entities
-        function Get-CleanText {
-            param([string]$HtmlText)
-            # Remove HTML tags
-            $text = $HtmlText -replace '<[^>]+>', ''
-            # Decode common HTML entities
-            $text = $text -replace '&nbsp;', ' '
-            $text = $text -replace '&amp;', '&'
-            $text = $text -replace '&lt;', '<'
-            $text = $text -replace '&gt;', '>'
-            $text = $text -replace '&quot;', '"'
-            $text = $text -replace '&#(\d+);', { [char][int]$_.Groups[1].Value }
-            return $text.Trim()
-        }
-        
-        # Extract table data from the page
-        $TableData = @()
-        
-        # Find the main data table - try multiple patterns
-        $TablePattern = '<table[^>]*(?:class="[^"]*(?:grid|data|score)[^"]*"|id="[^"]*(?:gv|grid|tbl)[^"]*")[^>]*>([\s\S]*?)</table>'
-        if ($ScoreSheetResponse.Content -match $TablePattern) {
-            $TableHtml = $Matches[1]
-            
-            # Extract headers - handle content that may contain nested tags
-            $Headers = @()
-            [regex]::Matches($TableHtml, '<th[^>]*>([\s\S]*?)</th>') | ForEach-Object {
-                $Headers += Get-CleanText $_.Groups[1].Value
-            }
-            
-            # Extract rows - handle content that may contain nested tags
-            [regex]::Matches($TableHtml, '<tr[^>]*>([\s\S]*?)</tr>') | ForEach-Object {
-                $RowHtml = $_.Groups[1].Value
-                $RowData = @()
-                [regex]::Matches($RowHtml, '<td[^>]*>([\s\S]*?)</td>') | ForEach-Object {
-                    $RowData += Get-CleanText $_.Groups[1].Value
-                }
-                
-                if ($RowData.Count -gt 0) {
-                    $RowObject = [PSCustomObject]@{}
-                    for ($i = 0; $i -lt [Math]::Min($Headers.Count, $RowData.Count); $i++) {
-                        $HeaderName = if ([string]::IsNullOrWhiteSpace($Headers[$i])) { "Column$i" } else { $Headers[$i] }
-                        $RowObject | Add-Member -NotePropertyName $HeaderName -NotePropertyValue $RowData[$i]
-                    }
-                    $TableData += $RowObject
-                }
-            }
-        }
-        
-        if ($TableData.Count -gt 0) {
-            # Create output directory structure
-            $OutputFolder = Join-Path -Path $OutputPath -ChildPath "Season Score Sheets"
-            $SchoolFolder = Join-Path -Path $OutputFolder -ChildPath $SchoolNameClean
-            
-            if (-not (Test-Path -Path $SchoolFolder)) {
-                New-Item -Path $SchoolFolder -ItemType Directory -Force | Out-Null
-                Write-Host "Created folder: $SchoolFolder" -ForegroundColor Cyan
-            }
-            
-            # Generate filename with timestamp
-            $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-            $SeasonSuffix = if ($Season) { "_$($Season -replace '\s+', '_')" } else { "" }
-            $OutputFileName = "SeasonScoreSheet${SeasonSuffix}_$Timestamp.csv"
-            $OutputFilePath = Join-Path -Path $SchoolFolder -ChildPath $OutputFileName
-            
-            # Export to CSV
-            $TableData | Export-Csv -Path $OutputFilePath -NoTypeInformation -Encoding UTF8
-            
-            Write-Host "Score sheet exported successfully!" -ForegroundColor Green
-            Write-Host "File saved to: $OutputFilePath" -ForegroundColor Cyan
-            
-            return $OutputFilePath
-        } else {
-            Write-Warning "Could not extract score sheet data. The page structure may have changed."
-            Write-Host "Please verify the page manually and update the script if needed." -ForegroundColor Yellow
-        }
+        return $filePath
     }
+    catch {
+        throw "Failed to save CSV file: $($_.Exception.Message)"
+    }
+}
+
+function Save-TableDataAsCsv {
+    <#
+    .SYNOPSIS
+        Saves table data as CSV file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [array]$TableData,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$OutputDirectory,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$Season
+    )
+    
+    if ($TableData.Count -eq 0) {
+        throw "No table data found to export. The page structure may have changed."
+    }
+    
+    $timestamp = Get-Date -Format $Script:Config.FileSettings.TimestampFormat
+    $seasonSafe = Get-SafeFileName -FileName $Season
+    $fileName = "SeasonScoreSheet_${seasonSafe}_$timestamp.csv"
+    $filePath = Join-Path -Path $OutputDirectory -ChildPath $fileName
+    
+    try {
+        $TableData | Export-Csv -Path $filePath -NoTypeInformation -Encoding $Script:Config.FileSettings.Encoding
+        
+        Write-StatusMessage "Score sheet exported successfully!" -Level Success
+        Write-StatusMessage "File saved to: $filePath" -Level Information
+        
+        return $filePath
+    }
+    catch {
+        throw "Failed to save table data as CSV: $($_.Exception.Message)"
+    }
+}
+#endregion
+
+#region Main Execution
+try {
+    # Get credentials
+    $credential = Get-UserCredentials -Credential $Credential
+    
+    # Initialize session and login
+    $loginPageResponse = Initialize-WebSession
+
+    Invoke-Login -Credential $credential -LoginPageResponse $loginPageResponse
+    
+    # Get score sheet page
+    $scoreSheetResponse = Get-ScoreSheetPage
+    
+    # Extract information
+    $schoolInfo = Get-SchoolInformation -Response $scoreSheetResponse
+    $seasonInfo = Get-SeasonInformation -Response $scoreSheetResponse -RequestedSeason $Season
+    
+    # Update season selection if needed
+    if ($seasonInfo.NeedsPostback) {
+        $scoreSheetResponse = Set-SeasonSelection -SeasonInfo $seasonInfo -Response $scoreSheetResponse
+    }
+    
+    Write-StatusMessage "Season: $($seasonInfo.SelectedSeason)" -Level Information
+    
+    # Export data
+    $exportResponse = Export-ScoreSheetData -Response $scoreSheetResponse -SeasonInfo $seasonInfo
+    
+    # Create output directory
+    $outputDirectory = New-OutputDirectory -BasePath $OutputPath -SchoolInfo $schoolInfo -Season $seasonInfo.SelectedSeason
+    
+    # Check if we got CSV content
+    $csvContent = Test-CsvResponse -Response $exportResponse
+    
+    if ($csvContent) {
+        # Save CSV data directly
+        $outputFilePath = Save-CsvData -CsvContent $csvContent -OutputDirectory $outputDirectory -School $schoolInfo.Name -Season $seasonInfo.SelectedSeason
+    }
+    else {
+        # Try to parse HTML table data
+        $tableData = Get-TableDataFromHtml -Response $exportResponse
+        $outputFilePath = Save-TableDataAsCsv -TableData $tableData -OutputDirectory $outputDirectory -Season $seasonInfo.SelectedSeason
+    }
+    
+    return $outputFilePath
 }
 catch {
-    Write-Error "An error occurred: $_"
-    Write-Host "Error details: $($_.Exception.Message)" -ForegroundColor Red
-    if ($_.Exception.Response) {
-        Write-Host "Response status: $($_.Exception.Response.StatusCode)" -ForegroundColor Red
-    }
-    exit 1
+    Write-StatusMessage "An error occurred: $($_.Exception.Message)" -Level Error
+    Write-Verbose "Error details: $($_.Exception)"
+    throw
 }
+#endregion
