@@ -200,3 +200,54 @@ function Set-SeasonSelection {
         return $Response
     }
 }
+
+function Get-SeasonsFromDropdown {
+    <#
+    .SYNOPSIS
+        Extracts all available seasons from the dropdown on the score sheet page.
+    
+    .PARAMETER Response
+        The web response containing the season dropdown.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject]$Response
+    )
+    
+    $seasons = @()
+    
+    # Find season dropdown ID
+    $dropdownId = ""
+    if ($Response.Content -match $Script:Config.Patterns.SeasonDropdown1) {
+        $dropdownId = $Matches[1]
+    }
+    elseif ($Response.Content -match $Script:Config.Patterns.SeasonDropdown2) {
+        $dropdownId = $Matches[1]
+    }
+    
+    if (-not $dropdownId) {
+        Write-StatusMessage "Could not find season dropdown on the page" -Level Warning
+        return $seasons
+    }
+    
+    # Find the dropdown section in the HTML
+    $dropdownPattern = '<select[^>]*id="' + [regex]::Escape($dropdownId) + '"[^>]*>([\s\S]*?)</select>'
+    if ($Response.Content -match $dropdownPattern) {
+        $dropdownContent = $Matches[1]
+        
+        # Extract all option values and text
+        $optionPattern = '<option[^>]*value="([^"]*)"[^>]*>([^<]+)</option>'
+        [regex]::Matches($dropdownContent, $optionPattern) | ForEach-Object {
+            $seasonText = $_.Groups[2].Value.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($seasonText)) {
+                $seasons += $seasonText
+            }
+        }
+    }
+    
+    # Remove duplicates and sort
+    $seasons = $seasons | Sort-Object -Unique
+    
+    return $seasons
+}

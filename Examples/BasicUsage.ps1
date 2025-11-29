@@ -40,7 +40,21 @@ catch {
 }
 
 Write-Host
-Write-Host "Example 2: Using pre-created credentials" -ForegroundColor Yellow
+Write-Host "Example 2: Get available seasons" -ForegroundColor Yellow
+Write-Host "Get-AvailableSeasons" -ForegroundColor Cyan
+
+try {
+    # Uncomment the lines below to run the seasons example
+    # $seasons = Get-AvailableSeasons
+    # Write-Host "Available seasons: $($seasons -join ', ')" -ForegroundColor Green
+    Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
+}
+catch {
+    Write-Warning "Error in Example 2: $($_.Exception.Message)"
+}
+
+Write-Host
+Write-Host "Example 3: Using pre-created credentials" -ForegroundColor Yellow
 Write-Host "Export-SeasonScoreSheet -Credential `$cred" -ForegroundColor Cyan
 
 try {
@@ -49,17 +63,37 @@ try {
     # $cred = Get-Credential -Message "Enter your NASP Tournaments credentials"
     
     # Uncomment the lines below to run with credentials
-    # $result2 = Export-SeasonScoreSheet -Credential $cred
-    # Write-Host "Export completed: $result2" -ForegroundColor Green
+    # $result3 = Export-SeasonScoreSheet -Credential $cred
+    # Write-Host "Export completed: $result3" -ForegroundColor Green
     Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
 }
 catch {
-    Write-Warning "Error in Example 2: $($_.Exception.Message)"
+    Write-Warning "Error in Example 3: $($_.Exception.Message)"
 }
 
 Write-Host
-Write-Host "Example 3: Specifying season and output path" -ForegroundColor Yellow
-Write-Host "Export-SeasonScoreSheet -Season '2023-2024' -OutputPath 'C:\Exports'" -ForegroundColor Cyan
+Write-Host "Example 4: Discover and export specific season" -ForegroundColor Yellow
+Write-Host "Get-AvailableSeasons + Export-SeasonScoreSheet" -ForegroundColor Cyan
+
+try {
+    # Uncomment the lines below to run the discover and export example
+    # $cred = Get-Credential -Message "Enter your NASP Tournaments credentials"
+    # $seasons = Get-AvailableSeasons -Credential $cred
+    # Write-Host "Available seasons: $($seasons -join ', ')" -ForegroundColor Green
+    # $selectedSeason = $seasons | Where-Object { $_ -like "*2023*" } | Select-Object -First 1
+    # if ($selectedSeason) {
+    #     $result4 = Export-SeasonScoreSheet -Credential $cred -Season $selectedSeason
+    #     Write-Host "Export completed: $result4" -ForegroundColor Green
+    # }
+    Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
+}
+catch {
+    Write-Warning "Error in Example 4: $($_.Exception.Message)"
+}
+
+Write-Host
+Write-Host "Example 5: Specifying season and output path" -ForegroundColor Yellow
+Write-Host "Export-SeasonScoreSheet -Season '2023-2024' -OutputPath 'C:\\Exports'" -ForegroundColor Cyan
 
 try {
     # Create output directory if it doesn't exist
@@ -71,28 +105,28 @@ try {
     Write-Host "Using output path: $outputPath" -ForegroundColor Gray
     
     # Uncomment the lines below to run with specific season and output path
-    # $result3 = Export-SeasonScoreSheet -Season "2023-2024" -OutputPath $outputPath
-    # Write-Host "Export completed: $result3" -ForegroundColor Green
+    # $result5 = Export-SeasonScoreSheet -Season "2023-2024" -OutputPath $outputPath
+    # Write-Host "Export completed: $result5" -ForegroundColor Green
     Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
 }
 catch {
-    Write-Warning "Error in Example 3: $($_.Exception.Message)"
+    Write-Warning "Error in Example 5: $($_.Exception.Message)"
 }
 
 Write-Host
-Write-Host "Example 4: Full parameter example" -ForegroundColor Yellow
+Write-Host "Example 6: Full parameter example" -ForegroundColor Yellow
 Write-Host "Export-SeasonScoreSheet -Credential `$cred -Season '2023-2024' -OrganizationId 5232 -OutputPath 'C:\Exports'" -ForegroundColor Cyan
 
 try {
     # Uncomment the lines below to run the full example
     # $cred = Get-Credential -Message "Enter your NASP Tournaments credentials"
     # $outputPath = Join-Path $env:TEMP "BaiHelper_Full_Example"
-    # $result4 = Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath $outputPath
-    # Write-Host "Export completed: $result4" -ForegroundColor Green
+    # $result6 = Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath $outputPath
+    # Write-Host "Export completed: $result6" -ForegroundColor Green
     Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
 }
 catch {
-    Write-Warning "Error in Example 4: $($_.Exception.Message)"
+    Write-Warning "Error in Example 6: $($_.Exception.Message)"
 }
 
 Write-Host
@@ -101,5 +135,6 @@ Write-Host "1. Uncomment the example you want to test" -ForegroundColor White
 Write-Host "2. Make sure you have valid NASP Tournaments credentials" -ForegroundColor White
 Write-Host "3. Run the script" -ForegroundColor White
 Write-Host
-Write-Host "For help with the function, use:" -ForegroundColor Green
+Write-Host "For help with the functions, use:" -ForegroundColor Green
 Write-Host "Get-Help Export-SeasonScoreSheet -Full" -ForegroundColor Cyan
+Write-Host "Get-Help Get-AvailableSeasons -Full" -ForegroundColor Cyan

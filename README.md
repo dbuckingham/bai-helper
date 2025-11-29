@@ -4,7 +4,13 @@ A PowerShell module for exporting season score sheets from NASP Tournaments webs
 
 ## Overview
 
-The BaiHelper module provides the `Export-SeasonScoreSheet` function that logs into the NASP Tournaments website, navigates to the Season Score Sheet page, and exports the data to a CSV file. The exported file is saved in an organized folder structure: "Season Score Sheets/{SchoolName}/{Season}". The module automatically extracts the school name from the website and handles multiple export methods for maximum compatibility.
+The BaiHelper module provides functions for working with NASP Tournaments website:
+
+- **Export-SeasonScoreSheet**: Logs into the NASP Tournaments website, navigates to the Season Score Sheet page, and exports the data to a CSV file. The exported file is saved in an organized folder structure: "Season Score Sheets/{SchoolName}/{Season}".
+
+- **Get-AvailableSeasons**: Retrieves the list of available seasons for a given school organization, which is useful for discovering which seasons can be exported.
+
+Both functions automatically handle authentication and provide multiple export methods for maximum compatibility.
 
 ## Installation
 
@@ -39,6 +45,17 @@ Import-Module BaiHelper
 Export-SeasonScoreSheet
 ```
 
+#### Get Available Seasons
+
+```powershell
+# Get list of available seasons for default organization
+$seasons = Get-AvailableSeasons
+$seasons | ForEach-Object { Write-Host "Available season: $_" }
+
+# Get seasons for specific organization
+Get-AvailableSeasons -OrganizationId 1234
+```
+
 #### Provide Credentials
 
 ```powershell
@@ -71,7 +88,22 @@ $cred = Get-Credential
 Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath "C:\MyExports"
 ```
 
+#### Discover and Export Specific Season
+
+```powershell
+# First, get available seasons
+$cred = Get-Credential
+$seasons = Get-AvailableSeasons -Credential $cred -OrganizationId 5232
+Write-Host "Available seasons: $($seasons -join ', ')"
+
+# Then export a specific season
+$selectedSeason = $seasons | Where-Object { $_ -like "*2023*" } | Select-Object -First 1
+Export-SeasonScoreSheet -Credential $cred -Season $selectedSeason -OrganizationId 5232
+```
+
 ### Parameters
+
+#### Export-SeasonScoreSheet Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
@@ -79,6 +111,13 @@ Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 52
 | `-Season` | No | The season to select from the dropdown menu. If not provided, the default (current) season is used. |
 | `-OrganizationId` | No | The organization ID for the score sheet URL. Defaults to 5232. |
 | `-OutputPath` | No | Base path where "Season Score Sheets" folder will be created. Defaults to current directory. |
+
+#### Get-AvailableSeasons Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-Credential` | No | A PSCredential object containing login credentials. If not provided, you will be prompted to enter credentials. |
+| `-OrganizationId` | No | The organization ID to retrieve seasons for. Defaults to 5232. |
 
 ## Requirements
 
@@ -92,7 +131,8 @@ BaiHelper/
 ├── BaiHelper.psd1          # Module manifest
 ├── BaiHelper.psm1          # Main module file
 ├── Public/                 # Public functions
-│   └── Export-SeasonScoreSheet.ps1
+│   ├── Export-SeasonScoreSheet.ps1
+│   └── Get-AvailableSeasons.ps1
 ├── Private/                # Private helper functions
 │   ├── Config.ps1
 │   ├── CommonHelpers.ps1

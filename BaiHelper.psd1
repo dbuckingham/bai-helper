@@ -42,7 +42,7 @@
     FormatsToProcess = @()
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry
-    FunctionsToExport = @('Export-SeasonScoreSheet')
+    FunctionsToExport = @('Export-SeasonScoreSheet', 'Get-AvailableSeasons')
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry
     CmdletsToExport = @()
