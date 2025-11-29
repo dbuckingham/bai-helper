@@ -1,54 +1,74 @@
-# bai-helper
+# BaiHelper PowerShell Module
 
-A PowerShell utility for exporting season score sheets from NASP Tournaments.
+A PowerShell module for exporting season score sheets from NASP Tournaments website.
 
-## Export-SeasonScoreSheet.ps1
+## Overview
 
-This script logs into the NASP Tournaments website, navigates to the Season Score Sheet page, and exports the data to a CSV file. The exported file is saved in an organized folder structure: "Season Score Sheets/{SchoolName}/{Season}". The script automatically extracts the school name from the website and handles multiple export methods for maximum compatibility.
+The BaiHelper module provides the `Export-SeasonScoreSheet` function that logs into the NASP Tournaments website, navigates to the Season Score Sheet page, and exports the data to a CSV file. The exported file is saved in an organized folder structure: "Season Score Sheets/{SchoolName}/{Season}". The module automatically extracts the school name from the website and handles multiple export methods for maximum compatibility.
 
-### Requirements
+## Installation
 
-- PowerShell 5.1 or later
-- Valid NASP Tournaments account credentials
+### Option 1: Manual Installation
+1. Download or clone this repository
+2. Copy the entire `BaiHelper` folder to one of your PowerShell module paths:
+   - User modules: `$HOME\Documents\PowerShell\Modules\` (PowerShell Core)
+   - User modules: `$HOME\Documents\WindowsPowerShell\Modules\` (Windows PowerShell)
+   - System modules: `$env:ProgramFiles\PowerShell\Modules\`
 
-### Usage
+### Option 2: Import from Local Path
+```powershell
+Import-Module "C:\Path\To\BaiHelper" -Force
+```
+
+### Verify Installation
+```powershell
+Get-Module BaiHelper -ListAvailable
+Get-Command -Module BaiHelper
+```
+
+## Usage
+
+### Import the Module
+```powershell
+Import-Module BaiHelper
+```
 
 #### Basic Usage (Prompts for Credentials)
 
 ```powershell
-.\Export-SeasonScoreSheet.ps1
+Export-SeasonScoreSheet
 ```
 
 #### Provide Credentials
 
 ```powershell
 $cred = Get-Credential
-.\Export-SeasonScoreSheet.ps1 -Credential $cred
+Export-SeasonScoreSheet -Credential $cred
 ```
 
 #### Select a Specific Season
 
 ```powershell
-.\Export-SeasonScoreSheet.ps1 -Season "2023-2024"
+Export-SeasonScoreSheet -Season "2023-2024"
 ```
 
 #### Specify Organization ID
 
 ```powershell
-.\Export-SeasonScoreSheet.ps1 -OrganizationId 5232
+Export-SeasonScoreSheet -OrganizationId 5232
 ```
 
 #### Specify Output Location
 
 ```powershell
-.\Export-SeasonScoreSheet.ps1 -OutputPath "C:\MyExports"
+Export-SeasonScoreSheet -OutputPath "C:\MyExports"
 ```
 
 #### Full Example with All Parameters
 
 ```powershell
 $cred = Get-Credential
-.\Export-SeasonScoreSheet.ps1 -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath "C:\MyExports"
+Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath "C:\MyExports"
 ```
 
 ### Parameters
@@ -60,6 +80,30 @@ $cred = Get-Credential
 | `-OrganizationId` | No | The organization ID for the score sheet URL. Defaults to 5232. |
 | `-OutputPath` | No | Base path where "Season Score Sheets" folder will be created. Defaults to current directory. |
 
+## Requirements
+
+- PowerShell 5.1 or later
+- Valid NASP Tournaments account credentials
+
+## Module Structure
+
+```
+BaiHelper/
+├── BaiHelper.psd1          # Module manifest
+├── BaiHelper.psm1          # Main module file
+├── Public/                 # Public functions
+│   └── Export-SeasonScoreSheet.ps1
+├── Private/                # Private helper functions
+│   ├── Config.ps1
+│   ├── CommonHelpers.ps1
+│   ├── AuthenticationHelpers.ps1
+│   ├── DataExtractionHelpers.ps1
+│   ├── ExportHelpers.ps1
+│   └── FileOperationHelpers.ps1
+└── Examples/               # Example scripts
+    └── BasicUsage.ps1
+```
+
 ### Output
 
 The script creates the following organized folder structure:
@@ -69,7 +113,7 @@ The script creates the following organized folder structure:
 └── Season Score Sheets/
     └── {SchoolName}/
         └── {Season}/
-            └── SeasonScoreSheet_{Season}_{Timestamp}.csv
+            └── SeasonScoreSheet_{SchoolName}_{Season}.csv
 ```
 
 **Example:**
@@ -78,7 +122,7 @@ C:\MyExports/
 └── Season Score Sheets/
     └── Sample_High_School/
         └── 2023-2024/
-            └── SeasonScoreSheet_2023-2024_20231126_143022.csv
+            └── SeasonScoreSheet_Sample_High_School_2023-2024.csv
 ```
 
 ### Features
@@ -89,7 +133,7 @@ C:\MyExports/
   - Primary: Direct CSV export from the website
   - Fallback: HTML table parsing when direct export is unavailable
 - **Error Handling**: Comprehensive error handling with detailed feedback
-- **Clean File Naming**: Removes invalid characters from school names and creates timestamped files
+- **Clean File Naming**: Removes invalid characters from school names and creates descriptive file names
 
 ### Notes
 
