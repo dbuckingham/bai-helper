@@ -92,7 +92,23 @@ catch {
 }
 
 Write-Host
-Write-Host "Example 5: Specifying season and output path" -ForegroundColor Yellow
+Write-Host "Example 5: Create Enhanced Score Sheet" -ForegroundColor Yellow
+Write-Host "New-EnhancedScoreSheet -SchoolName 'Sample_High_School' -Season '2023-2024'" -ForegroundColor Cyan
+
+try {
+    # Uncomment the lines below to run the enhancement example
+    # $enhancedPath = New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024"
+    # Write-Host "Enhanced score sheet created: $enhancedPath" -ForegroundColor Green
+    Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
+    Write-Host "Note: This requires an existing score sheet file to enhance" -ForegroundColor Gray
+    Write-Host "Adds AS_* (arrow counts), E_* (end scores), H1/H2 (half scores), and ES_* (end analysis)" -ForegroundColor Gray
+}
+catch {
+    Write-Warning "Error in Example 5: $($_.Exception.Message)"
+}
+
+Write-Host
+Write-Host "Example 6: Specifying season and output path" -ForegroundColor Yellow
 Write-Host "Export-SeasonScoreSheet -Season '2023-2024' -OutputPath 'C:\\Exports'" -ForegroundColor Cyan
 
 try {
@@ -105,28 +121,28 @@ try {
     Write-Host "Using output path: $outputPath" -ForegroundColor Gray
     
     # Uncomment the lines below to run with specific season and output path
-    # $result5 = Export-SeasonScoreSheet -Season "2023-2024" -OutputPath $outputPath
-    # Write-Host "Export completed: $result5" -ForegroundColor Green
+    # $result6 = Export-SeasonScoreSheet -Season "2023-2024" -OutputPath $outputPath
+    # Write-Host "Export completed: $result6" -ForegroundColor Green
     Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
 }
 catch {
-    Write-Warning "Error in Example 5: $($_.Exception.Message)"
+    Write-Warning "Error in Example 6: $($_.Exception.Message)"
 }
 
 Write-Host
-Write-Host "Example 6: Full parameter example" -ForegroundColor Yellow
+Write-Host "Example 7: Full parameter example" -ForegroundColor Yellow
 Write-Host "Export-SeasonScoreSheet -Credential `$cred -Season '2023-2024' -OrganizationId 5232 -OutputPath 'C:\Exports'" -ForegroundColor Cyan
 
 try {
     # Uncomment the lines below to run the full example
     # $cred = Get-Credential -Message "Enter your NASP Tournaments credentials"
     # $outputPath = Join-Path $env:TEMP "BaiHelper_Full_Example"
-    # $result6 = Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath $outputPath
-    # Write-Host "Export completed: $result6" -ForegroundColor Green
+    # $result7 = Export-SeasonScoreSheet -Credential $cred -Season "2023-2024" -OrganizationId 5232 -OutputPath $outputPath
+    # Write-Host "Export completed: $result7" -ForegroundColor Green
     Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
 }
 catch {
-    Write-Warning "Error in Example 6: $($_.Exception.Message)"
+    Write-Warning "Error in Example 7: $($_.Exception.Message)"
 }
 
 Write-Host
@@ -138,3 +154,4 @@ Write-Host
 Write-Host "For help with the functions, use:" -ForegroundColor Green
 Write-Host "Get-Help Export-SeasonScoreSheet -Full" -ForegroundColor Cyan
 Write-Host "Get-Help Get-AvailableSeasons -Full" -ForegroundColor Cyan
+Write-Host "Get-Help New-EnhancedScoreSheet -Full" -ForegroundColor Cyan
