@@ -66,6 +66,9 @@ New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024"
 
 # Specify custom base path
 New-EnhancedScoreSheet -SchoolName "My_School" -Season "2024-2025" -BasePath "C:\Exports"
+
+# Skip empty files instead of failing
+New-EnhancedScoreSheet -SchoolName "School_Name" -Season "2023-2024" -IgnoreEmpty
 ```
 
 #### Provide Credentials
@@ -151,6 +154,7 @@ Write-Host "Enhanced version created: $enhancedPath"
 | `-SchoolName` | Yes | The name of the school (must match the folder name in the Season Score Sheets directory). |
 | `-Season` | Yes | The season name (must match the folder name under the school directory). |
 | `-BasePath` | No | The base path where the "Season Score Sheets" folder is located. Defaults to current directory. |
+| `-IgnoreEmpty` | No | When specified, skips processing and returns null instead of throwing an error if the score sheet file is empty. |
 
 ## Requirements
 

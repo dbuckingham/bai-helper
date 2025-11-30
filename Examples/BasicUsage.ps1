@@ -99,9 +99,19 @@ try {
     # Uncomment the lines below to run the enhancement example
     # $enhancedPath = New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024"
     # Write-Host "Enhanced score sheet created: $enhancedPath" -ForegroundColor Green
+    
+    # Example with IgnoreEmpty parameter
+    # $enhancedPath = New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024" -IgnoreEmpty
+    # if ($enhancedPath) {
+    #     Write-Host "Enhanced score sheet created: $enhancedPath" -ForegroundColor Green
+    # } else {
+    #     Write-Host "Score sheet was empty, skipped enhancement" -ForegroundColor Yellow
+    # }
+    
     Write-Host "Example commented out - remove comments to test" -ForegroundColor Gray
     Write-Host "Note: This requires an existing score sheet file to enhance" -ForegroundColor Gray
     Write-Host "Adds AS_* (arrow counts), E_* (end scores), H1/H2 (half scores), and ES_* (end analysis)" -ForegroundColor Gray
+    Write-Host "Use -IgnoreEmpty to skip processing empty files instead of failing" -ForegroundColor Gray
 }
 catch {
     Write-Warning "Error in Example 5: $($_.Exception.Message)"

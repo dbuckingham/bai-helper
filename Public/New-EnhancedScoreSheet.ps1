@@ -22,6 +22,10 @@ function New-EnhancedScoreSheet {
         Optional. The base path where the "Season Score Sheets" folder is located.
         Defaults to the current directory.
 
+    .PARAMETER IgnoreEmpty
+        Optional. When specified, the function will skip processing and return null 
+        instead of throwing an error if the score sheet file is empty or contains no data.
+
     .EXAMPLE
         New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024"
         Creates an enhanced copy of the score sheet for Sample High School's 2023-2024 season.
@@ -30,9 +34,13 @@ function New-EnhancedScoreSheet {
         New-EnhancedScoreSheet -SchoolName "My_School" -Season "2024-2025" -BasePath "C:\Exports"
         Creates an enhanced copy using a specific base path.
 
+    .EXAMPLE
+        New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024" -IgnoreEmpty
+        Creates an enhanced copy, skipping processing if the score sheet file is empty.
+
     .OUTPUTS
-        System.String
-        Returns the full path to the enhanced CSV file.
+        System.String or $null
+        Returns the full path to the enhanced CSV file, or $null if the file was empty and -IgnoreEmpty was specified.
 
     .NOTES
         Author: BAI Helper
@@ -63,7 +71,11 @@ function New-EnhancedScoreSheet {
         [Parameter(Mandatory = $false)]
         [ValidateScript({Test-Path $_ -IsValid})]
         [string]
-        $BasePath = (Get-Location).Path
+        $BasePath = (Get-Location).Path,
+
+        [Parameter(Mandatory = $false)]
+        [switch]
+        $IgnoreEmpty
     )
 
     try {
@@ -80,7 +92,13 @@ function New-EnhancedScoreSheet {
         $csvData = Import-Csv -Path $scoreSheetPath -Encoding UTF8
 
         if (-not $csvData -or $csvData.Count -eq 0) {
-            throw "Score sheet file is empty or could not be read: $scoreSheetPath"
+            if ($IgnoreEmpty) {
+                Write-StatusMessage "Score sheet file is empty, skipping enhancement as requested: $scoreSheetPath" -Level Warning
+                return $null
+            }
+            else {
+                throw "Score sheet file is empty or could not be read: $scoreSheetPath"
+            }
         }
 
         Write-StatusMessage "Processing $($csvData.Count) rows..." -Level Information
