@@ -12,6 +12,8 @@ The BaiHelper module provides functions for working with NASP Tournaments websit
 
 - **New-EnhancedScoreSheet**: Creates an enhanced copy of an existing Season Score Sheet with comprehensive analysis columns: arrow counts (AS_*), end scores (E_*), half scores (H1, H2), and end score distribution analysis (ES_*).
 
+- **New-SeasonSummaryExcel**: Creates an Excel workbook with comprehensive tournament results analysis using Enhanced score sheets, including team scores, individual statistics, arrow distributions, and end score summaries for each tournament in a season.
+
 The functions work together to provide a complete workflow for downloading, analyzing, and enhancing archery score data.
 
 ## Installation
@@ -69,6 +71,19 @@ New-EnhancedScoreSheet -SchoolName "My_School" -Season "2024-2025" -BasePath "C:
 
 # Skip empty files instead of failing
 New-EnhancedScoreSheet -SchoolName "School_Name" -Season "2023-2024" -IgnoreEmpty
+```
+
+#### Create Season Summary Excel Workbook
+
+```powershell
+# First, ensure you have Enhanced score sheets (run this if needed)
+New-EnhancedScoreSheet -SchoolName "Sample_High_School" -Season "2023-2024"
+
+# Create comprehensive tournament analysis Excel workbook
+New-SeasonSummaryExcel -SchoolName "Sample_High_School" -Season "2023-2024"
+
+# Specify custom base path
+New-SeasonSummaryExcel -SchoolName "My_School" -Season "2024-2025" -BasePath "C:\Exports"
 ```
 
 #### Provide Credentials
@@ -156,10 +171,20 @@ Write-Host "Enhanced version created: $enhancedPath"
 | `-BasePath` | No | The base path where the "Season Score Sheets" folder is located. Defaults to current directory. |
 | `-IgnoreEmpty` | No | When specified, skips processing and returns null instead of throwing an error if the score sheet file is empty. |
 
+#### New-SeasonSummaryExcel Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `-SchoolName` | Yes | The name of the school (must match the folder name in the Season Score Sheets directory). |
+| `-Season` | Yes | The season name (must match the folder name under the school directory). |
+| `-BasePath` | No | The base path where the "Season Score Sheets" folder is located. Defaults to current directory. |
+
 ## Requirements
 
 - PowerShell 5.1 or later
 - Valid NASP Tournaments account credentials
+- ImportExcel module (required for New-SeasonSummaryExcel function)
+  - Install with: `Install-Module ImportExcel -Force`
 
 ## Module Structure
 
@@ -170,7 +195,8 @@ BaiHelper/
 ├── Public/                 # Public functions
 │   ├── Export-SeasonScoreSheet.ps1
 │   ├── Get-AvailableSeasons.ps1
-│   └── New-EnhancedScoreSheet.ps1
+│   ├── New-EnhancedScoreSheet.ps1
+│   └── New-SeasonSummaryExcel.ps1
 ├── Private/                # Private helper functions
 │   ├── Config.ps1
 │   ├── CommonHelpers.ps1
